@@ -22,8 +22,8 @@ if "clients_db" not in st.session_state:
     st.session_state.clients_db = {
         "admin": {"password": "admin123", "role": "admin", "name": "Administrador General"},
         "cliente1": {"password": "123", "role": "client", "name": "Soluciones 503"},
-        "cliente2": {"password": "123", "role": "client", "name": "Leftech"}
-        "cliente3": {"password": "123", "role": "client", "name": "Distribuidore Libertad"}
+        "cliente2": {"password": "123", "role": "client", "name": "Leftech"},
+        "cliente3": {"password": "123", "role": "client", "name": "Distribuidore Libertad"},
         "cliente4": {"password": "123", "role": "client", "name": "Cedillo"}
     }
 
