@@ -10,7 +10,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Inicialización de Estados (Base Intacta) ---
+# --- Inicialización de Estados ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "user_role" not in st.session_state:
@@ -21,10 +21,8 @@ if "username" not in st.session_state:
 if "clients_db" not in st.session_state:
     st.session_state.clients_db = {
         "admin": {"password": "admin123", "role": "admin", "name": "Administrador General"},
-        "cliente1": {"password": "123", "role": "client", "name": "Soluciones 503"},
-        "cliente2": {"password": "123", "role": "client", "name": "Leftech"},
-        "cliente3": {"password": "123", "role": "client", "name": "Distribuidore Libertad"},
-        "cliente4": {"password": "123", "role": "client", "name": "Cedillo"}
+        "comercial_alfa": {"password": "123", "role": "client", "name": "Comercial Alfa S.A. de C.V."},
+        "distribuidora_beta": {"password": "123", "role": "client", "name": "Distribuidora Beta"}
     }
 
 if "submissions" not in st.session_state:
@@ -77,24 +75,38 @@ def admin_dashboard():
             for idx, envio in enumerate(envios_periodo):
                 with st.expander(f"📁 {envio['client']} — Entregado el {envio['fecha']}"):
                     col_d1, col_d2 = st.columns(2)
+                    
                     with col_d1:
-                        st.markdown("**Ventas:**")
-                        if envio['sales_json']:
-                            st.download_button(f"Descargar JSON Ventas", envio['sales_json'].getvalue(), file_name=envio['sales_name'], key=f"s_json_{idx}")
+                        st.markdown("**📈 Ventas:**")
+                        if envio.get('sales_json_list'):
+                            st.text(f"JSONs de Ventas ({len(envio['sales_json_list'])} archivos):")
+                            for f_idx, file_obj in enumerate(envio['sales_json_list']):
+                                file_obj.seek(0)
+                                st.download_button(f"📥 {file_obj.name}", file_obj.getvalue(), file_name=file_obj.name, key=f"s_j_{idx}_{f_idx}")
                         else:
                             st.text("Sin JSON de ventas")
                             
-                        if envio['sales_pdf']:
-                            st.download_button(f"Descargar PDF/Resguardo Ventas", envio['sales_pdf'].getvalue(), file_name=envio['sales_pdf_name'], key=f"s_pdf_{idx}")
+                        if envio.get('sales_pdf_list'):
+                            st.text(f"PDFs/Resguardos Ventas ({len(envio['sales_pdf_list'])} archivos):")
+                            for f_idx, file_obj in enumerate(envio['sales_pdf_list']):
+                                file_obj.seek(0)
+                                st.download_button(f"📥 {file_obj.name}", file_obj.getvalue(), file_name=file_obj.name, key=f"s_p_{idx}_{f_idx}")
+                                
                     with col_d2:
-                        st.markdown("**Compras:**")
-                        if envio['purch_json']:
-                            st.download_button(f"Descargar JSON Compras", envio['purch_json'].getvalue(), file_name=envio['purch_name'], key=f"p_json_{idx}")
+                        st.markdown("**📉 Compras:**")
+                        if envio.get('purch_json_list'):
+                            st.text(f"JSONs de Compras ({len(envio['purch_json_list'])} archivos):")
+                            for f_idx, file_obj in enumerate(envio['purch_json_list']):
+                                file_obj.seek(0)
+                                st.download_button(f"📥 {file_obj.name}", file_obj.getvalue(), file_name=file_obj.name, key=f"p_j_{idx}_{f_idx}")
                         else:
                             st.text("Sin JSON de compras")
                             
-                        if envio['purch_pdf']:
-                            st.download_button(f"Descargar PDF Compras", envio['purch_pdf'].getvalue(), file_name=envio['purch_pdf_name'], key=f"p_pdf_{idx}")
+                        if envio.get('purch_pdf_list'):
+                            st.text(f"PDFs de Compras ({len(envio['purch_pdf_list'])} archivos):")
+                            for f_idx, file_obj in enumerate(envio['purch_pdf_list']):
+                                file_obj.seek(0)
+                                st.download_button(f"📥 {file_obj.name}", file_obj.getvalue(), file_name=file_obj.name, key=f"p_p_{idx}_{f_idx}")
         else:
             st.info(f"No hay documentos registrados para el periodo {periodo_seleccionado} todavía.")
 
@@ -128,12 +140,12 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-# --- Panel del Cliente (Fase 4: Drag & Drop optimizado + Validación rápida) ---
+# --- Panel del Cliente (Soporte Múltiple de Archivos) ---
 def client_dashboard():
     st.title(f"📁 Portal de Contribuyente — {st.session_state.username}")
-    st.markdown("Arrastra y suelta tus archivos de respaldo y JSON fiscales correspondientes al periodo en curso.")
+    st.markdown("Arrastra y suelta múltiples archivos JSON y PDFs correspondientes al periodo en curso.")
     
-    client_tab1, client_tab2 = st.tabs(["📤 Cargar Documentos (Drag & Drop)", "📜 Mi Historial de Envíos"])
+    client_tab1, client_tab2 = st.tabs(["📤 Cargar Documentos (Múltiples)", "📜 Mi Historial de Envíos"])
     
     with client_tab1:
         col1, col2 = st.columns(2)
@@ -149,47 +161,42 @@ def client_dashboard():
             
             with col_v:
                 st.subheader("📈 Ventas")
-                st.markdown("Arrastra aquí tu archivo JSON de ventas y tus PDFs o ZIP de respaldo.")
-                sales_json = st.file_uploader("Arrastra o selecciona el JSON de Ventas", type=["json"], key="s_json")
-                sales_pdf = st.file_uploader("Arrastra o selecciona PDFs de Ventas", type=["pdf", "zip"], key="s_pdf")
+                sales_json = st.file_uploader("Arrastra tus JSON de Ventas (Múltiples)", type=["json"], accept_multiple_files=True, key="s_json")
+                sales_pdf = st.file_uploader("Arrastra tus PDFs/ZIP de Ventas (Múltiples)", type=["pdf", "zip"], accept_multiple_files=True, key="s_pdf")
 
             with col_c:
                 st.subheader("📉 Compras y Gastos")
-                st.markdown("Arrastra aquí tu archivo JSON de compras y tus PDFs de respaldo.")
-                purch_json = st.file_uploader("Arrastra o selecciona el JSON de Compras", type=["json"], key="p_json")
-                purch_pdf = st.file_uploader("Arrastra o selecciona PDFs de Compras", type=["pdf", "zip"], key="p_pdf")
+                purch_json = st.file_uploader("Arrastra tus JSON de Compras (Múltiples)", type=["json"], accept_multiple_files=True, key="p_json")
+                purch_pdf = st.file_uploader("Arrastra tus PDFs de Compras (Múltiples)", type=["pdf", "zip"], accept_multiple_files=True, key="p_pdf")
                 
             submit_files = st.form_submit_button("🚀 Validar y Enviar Documentación", use_container_width=True)
             
             if submit_files:
                 if sales_json or purch_json:
-                    # Validación rápida (Fase 4) de estructura JSON
                     json_valido = True
-                    if sales_json:
+                    # Validar cada archivo JSON cargado
+                    for j_file in (sales_json or []) + (purch_json or []):
                         try:
-                            sales_json.seek(0)
-                            json.load(sales_json)
+                            j_file.seek(0)
+                            json.load(j_file)
                         except Exception:
                             json_valido = False
+                            break
                             
                     if json_valido:
                         periodo_str = f"{mes} {anio}"
                         st.session_state.submissions.append({
                             "client": st.session_state.username,
                             "periodo": periodo_str,
-                            "sales_json": sales_json,
-                            "sales_name": sales_json.name if sales_json else None,
-                            "sales_pdf": sales_pdf,
-                            "sales_pdf_name": sales_pdf.name if sales_pdf else None,
-                            "purch_json": purch_json,
-                            "purch_name": purch_json.name if purch_json else None,
-                            "purch_pdf": purch_pdf,
-                            "purch_pdf_name": purch_pdf.name if purch_pdf else None,
+                            "sales_json_list": sales_json,
+                            "sales_pdf_list": sales_pdf,
+                            "purch_json_list": purch_json,
+                            "purch_pdf_list": purch_pdf,
                             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
                         })
                         st.success(f"¡Estructura validada! Documentos del periodo {periodo_str} enviados correctamente a RI Consultores.")
                     else:
-                        st.error("El archivo JSON de ventas presenta un formato inválido o corrupto. Verifica el archivo.")
+                        st.error("Uno o más archivos JSON presentan un formato inválido o corrupto. Verifica tus archivos.")
                 else:
                     st.warning("Adjunta al menos un archivo JSON principal antes de enviar.")
 
@@ -200,11 +207,11 @@ def client_dashboard():
         if mis_envios:
             st.info("Aquí puedes verificar los comprobantes que ya has entregado en periodos anteriores.")
             for envio in mis_envios:
+                s_count = len(envio.get('sales_json_list', [])) + len(envio.get('sales_pdf_list', []))
+                p_count = len(envio.get('purch_json_list', [])) + len(envio.get('purch_pdf_list', []))
                 with st.expander(f"📅 Periodo: {envio['periodo']} (Enviado el {envio['fecha']})"):
-                    st.markdown(f"- **Ventas (JSON):** {envio['sales_name'] if envio['sales_json'] else 'No adjunto'}")
-                    st.markdown(f"- **Ventas (PDF):** {envio['sales_pdf_name'] if envio['sales_pdf'] else 'No adjunto'}")
-                    st.markdown(f"- **Compras (JSON):** {envio['purch_name'] if envio['purch_json'] else 'No adjunto'}")
-                    st.markdown(f"- **Compras (PDF):** {envio['purch_pdf_name'] if envio['purch_pdf'] else 'No adjunto'}")
+                    st.markdown(f"- **Archivos de Ventas cargados:** {s_count} archivo(s)")
+                    st.markdown(f"- **Archivos de Compras cargados:** {p_count} archivo(s)")
                     st.success("Estatus: Entregado y registrado con éxito.")
         else:
             st.warning("Aún no has registrado envíos de documentos en el portal.")
