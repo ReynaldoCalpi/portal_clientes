@@ -80,7 +80,7 @@ if "username" not in st.session_state:
 if "clients_db" not in st.session_state:
     st.session_state.clients_db = {
         "admin": {"password": "admin123", "role": "admin", "name": "Administrador General"},
-        "Soluciones503": {"password": "json321", "role": "client", "name": "Soluciones 503 S.A.S. de C.V."},
+        "cliente213": {"password": "json321", "role": "client", "name": "Soluciones 503 S.A.S. de C.V."},
         "Leftech": {"password": "json123", "role": "client", "name": "Leftech"},
         "Cedillo": {"password": "json421", "role": "client", "name": "Cedillo"},
         "Distribuidora Libertad": {"password": "json432", "role": "client", "name": "Distribuidora Libertad"}
