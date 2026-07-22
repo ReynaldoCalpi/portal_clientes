@@ -265,6 +265,11 @@ def admin_dashboard():
             st.success(f"Se encontraron {len(envios_periodo)} entregas para el periodo {periodo_seleccionado}.")
             for idx, envio in enumerate(envios_periodo):
                 with st.expander(f"📁 {envio['client']} — Entregado el {envio['fecha']}"):
+                    
+                    # --- Despliegue de Notas Aclaratorias del Cliente para el Admin ---
+                    if envio.get('notes'):
+                        st.info(f"**📝 Notas / Aclaraciones del Cliente:**\n\n{envio['notes']}")
+                    
                     col_d1, col_d2 = st.columns(2)
                     
                     with col_d1:
@@ -331,12 +336,11 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-# --- Panel del Cliente (Blindado y con Opciones Integradas) ---
+# --- Panel del Cliente (Blindado y con Notas Aclaratorias Integradas) ---
 def client_dashboard():
     st.title(f"📁 Portal de Contribuyente — {st.session_state.username}")
     st.markdown("Gestión y auditoría de documentos tributarios electrónicos.")
     
-    # Selector de periodo fiscal actual para el panel de pendientes y acciones requeridas
     col_p1, col_p2 = st.columns(2)
     with col_p1:
         mes = st.selectbox("Periodo Fiscal - Mes", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=5, key="client_mes")
@@ -345,13 +349,11 @@ def client_dashboard():
         
     periodo_str = f"{mes} {anio}"
     
-    # Aislamiento Estricto por ID Único del Cliente
     current_user_id = st.session_state.get("user_id", st.session_state.username)
     all_submissions = load_submissions()
     mis_envios = [s for s in all_submissions if s.get("user_id") == current_user_id or s.get("client") == st.session_state.username]
     envio_actual = next((s for s in mis_envios if s["periodo"] == periodo_str), None)
     
-    # --- Panel de "Pendientes y Acciones Requeridas" (To-Do List Fiscal) ---
     st.markdown("### 📌 Estatus y Acciones Requeridas")
     if envio_actual:
         st.success(f"✔️ **Periodo {periodo_str} al día:** Tus documentos han sido recibidos correctamente y se encuentran en proceso de auditoría por RI Consultores.")
@@ -360,7 +362,7 @@ def client_dashboard():
         
     st.divider()
     
-    client_tab1, client_tab2 = st.tabs(["📤 Cargar Documentos (Múltiples)", "📊 Historial, Resumen de IVA y Trazabilidad"])
+    client_tab1, client_tab2 = st.tabs(["📤 Cargar Documentos y Notas", "📊 Historial, Resumen de IVA y Trazabilidad"])
     
     with client_tab1:
         with st.form("upload_form"):
@@ -376,7 +378,15 @@ def client_dashboard():
                 purch_json = st.file_uploader("Arrastra tus JSON de Compras (Múltiples)", type=["json"], accept_multiple_files=True, key="p_json")
                 purch_pdf = st.file_uploader("Arrastra tus PDFs de Compras (Múltiples)", type=["pdf", "zip"], accept_multiple_files=True, key="p_pdf")
                 
-            submit_files = st.form_submit_button("🚀 Validar y Enviar Documentación", use_container_width=True)
+            st.divider()
+            st.subheader("📝 Notas Aclaratorias, Sugerencias y Observaciones por Documento o Mes")
+            client_notes = st.text_area(
+                "Usa este espacio para detallar aclaraciones sobre documentos específicos (ej. números de control anulados, notas de crédito asociadas, gastos mixtos o particulares del mes):",
+                placeholder="Ej. El DTE-03 número... corresponde a una anulación extemporánea. La factura de compra... incluye un gasto parcialmente deducible...",
+                key="notes_input"
+            )
+                
+            submit_files = st.form_submit_button("🚀 Validar y Enviar Documentación con Notas", use_container_width=True)
             
             if submit_files:
                 if sales_json or purch_json:
@@ -413,11 +423,12 @@ def client_dashboard():
                             "sales_pdf_list": s_pdf_saved,
                             "purch_json_list": p_json_saved,
                             "purch_pdf_list": p_pdf_saved,
+                            "notes": client_notes,
                             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
                         }
                         
                         save_submission_to_disk(submission_record)
-                        st.success(f"¡Estructura validada! Documentos del periodo {periodo_str} enviados correctamente a RI Consultores.")
+                        st.success(f"¡Estructura validada! Documentos y notas del periodo {periodo_str} enviados correctamente a RI Consultores.")
                         st.rerun()
                     else:
                         st.error(f"❌ Error en el archivo '{archivo_fallido}': {error_detallado}")
@@ -428,9 +439,15 @@ def client_dashboard():
         st.subheader("📊 Historial de Declaraciones, Resumen Ejecutivo de IVA y Trazabilidad DTE")
         
         if mis_envios:
-            st.info("Visualiza el detalle de tus declaraciones, el resumen de IVA y los códigos de generación y números de control correspondientes.")
+            st.info("Visualiza el detalle de tus declaraciones, las notas enviadas, el resumen de IVA y los códigos de generación correspondientes.")
             for envio in mis_envios:
                 with st.expander(f"📅 Periodo: {envio['periodo']} — Entregado el {envio['fecha']}"):
+                    
+                    # --- Mostrar Notas del Cliente en el Historial ---
+                    if envio.get('notes'):
+                        st.markdown("##### 📝 Tus Notas / Aclaraciones Enviadas")
+                        st.info(envio['notes'])
+                        st.markdown("---")
                     
                     df_sales = extract_invoice_summary(envio.get('sales_json_list'))
                     df_purch = extract_invoice_summary(envio.get('purch_json_list'))
@@ -444,7 +461,6 @@ def client_dashboard():
                     p_tot = df_purch['Total'].sum() if not df_purch.empty else 0.0
                     
                     # --- Resumen Ejecutivo de IVA para el Cliente ---
-                    st.markdown("---")
                     st.markdown("##### 💼 Resumen Ejecutivo de IVA")
                     col_re1, col_re2, col_re3 = st.columns(3)
                     col_re1.metric("Débito Fiscal (IVA Ventas)", f"${v_iva:,.2f}")
