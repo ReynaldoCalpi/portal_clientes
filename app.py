@@ -21,8 +21,8 @@ if "username" not in st.session_state:
 if "clients_db" not in st.session_state:
     st.session_state.clients_db = {
         "admin": {"password": "admin123", "role": "admin", "name": "Administrador General"},
-        "comercial_alfa": {"password": "123", "role": "client", "name": "Comercial Alfa S.A. de C.V."},
-        "distribuidora_beta": {"password": "123", "role": "client", "name": "Distribuidora Beta"}
+        "cliente1": {"password": "123", "role": "client", "name": "cliente1"},
+        "cliente2": {"password": "123", "role": "client", "name": "cliente2"}
     }
 
 if "submissions" not in st.session_state:
