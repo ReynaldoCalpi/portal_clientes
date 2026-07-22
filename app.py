@@ -69,6 +69,54 @@ def create_zip_buffer(json_list, pdf_list):
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
 
+def extract_invoice_summary(file_list):
+    """Extrae de los archivos JSON el número de documento, valor, iva y total para la tabla."""
+    summary_data = []
+    if not file_list:
+        return pd.DataFrame()
+    
+    for file_info in file_list:
+        path = file_info.get("path")
+        if path and os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8-sig") as f:
+                    content = json.load(f)
+                
+                items = content if isinstance(content, list) else [content]
+                for item in items:
+                    doc_num = (
+                        item.get("numeroControl") or 
+                        item.get("codigoGeneracion") or 
+                        item.get("numDocumento") or 
+                        item.get("numero") or 
+                        file_info["name"]
+                    )
+                    
+                    resumen = item.get("resumen", {})
+                    if isinstance(resumen, dict):
+                        val = resumen.get("totalGravada") or resumen.get("subTotal") or resumen.get("montoTotalOperacion") or 0.0
+                        iva = resumen.get("totalIva") or resumen.get("ivaRenta") or 0.0
+                        total = resumen.get("totalPagar") or resumen.get("montoTotalOperacion") or 0.0
+                    else:
+                        val = item.get("valor") or item.get("subtotal") or 0.0
+                        iva = item.get("iva") or 0.0
+                        total = item.get("total") or 0.0
+                        
+                    summary_data.append({
+                        "Documento": doc_num,
+                        "Valor ($)": float(val) if val else 0.0,
+                        "IVA ($)": float(iva) if iva else 0.0,
+                        "Total ($)": float(total) if total else 0.0
+                    })
+            except Exception:
+                summary_data.append({
+                    "Documento": file_info["name"],
+                    "Valor ($)": 0.0,
+                    "IVA ($)": 0.0,
+                    "Total ($)": 0.0
+                })
+    return pd.DataFrame(summary_data)
+
 # --- Inicialización de Estados de Sesión ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -211,7 +259,7 @@ def client_dashboard():
     st.title(f"📁 Portal de Contribuyente — {st.session_state.username}")
     st.markdown("Arrastra y suelta múltiples archivos JSON y PDFs correspondientes al periodo en curso.")
     
-    client_tab1, client_tab2 = st.tabs(["📤 Cargar Documentos (Múltiples)", "📜 Mi Historial de Envíos"])
+    client_tab1, client_tab2 = st.tabs(["📤 Cargar Documentos (Múltiples)", "📜 Mi Historial y Resumen Financiero"])
     
     with client_tab1:
         col1, col2 = st.columns(2)
@@ -284,19 +332,40 @@ def client_dashboard():
                     st.warning("Adjunta al menos un archivo JSON principal antes de enviar.")
 
     with client_tab2:
-        st.subheader("Historial de Declaraciones y Envíos Realizados")
+        st.subheader("📜 Historial de Declaraciones y Detalle de Documentos")
         all_submissions = load_submissions()
         mis_envios = [s for s in all_submissions if s["client"] == st.session_state.username]
         
         if mis_envios:
-            st.info("Aquí puedes verificar los comprobantes que ya has entregado en periodos anteriores.")
+            st.info("Aquí puedes verificar los comprobantes entregados y consultar el detalle de valores e IVA por cada periodo.")
             for envio in mis_envios:
-                s_count = len(envio.get('sales_json_list', [])) + len(envio.get('sales_pdf_list', []))
-                p_count = len(envio.get('purch_json_list', [])) + len(envio.get('purch_pdf_list', []))
                 with st.expander(f"📅 Periodo: {envio['periodo']} (Enviado el {envio['fecha']})"):
-                    st.markdown(f"- **Archivos de Ventas cargados:** {s_count} archivo(s)")
-                    st.markdown(f"- **Archivos de Compras cargados:** {p_count} archivo(s)")
-                    st.success("Estatus: Entregado y registrado con éxito.")
+                    
+                    # Resumen de Ventas
+                    st.markdown("##### 📈 Detalle de Ventas Registradas")
+                    df_sales = extract_invoice_summary(envio.get('sales_json_list'))
+                    if not df_sales.empty:
+                        st.dataframe(df_sales, use_container_width=True)
+                        total_v_val = df_sales['Valor ($)'].sum()
+                        total_v_iva = df_sales['IVA ($)'].sum()
+                        total_v_tot = df_sales['Total ($)'].sum()
+                        st.markdown(f"**Totales Ventas:** Subtotal: **${total_v_val:,.2f}** | IVA: **${total_v_iva:,.2f}** | **Total General: ${total_v_tot:,.2f}**")
+                    else:
+                        st.text("Sin registros detallados de ventas.")
+                        
+                    st.divider()
+                    
+                    # Resumen de Compras
+                    st.markdown("##### 📉 Detalle de Compras y Gastos Registrados")
+                    df_purch = extract_invoice_summary(envio.get('purch_json_list'))
+                    if not df_purch.empty:
+                        st.dataframe(df_purch, use_container_width=True)
+                        total_p_val = df_purch['Valor ($)'].sum()
+                        total_p_iva = df_purch['IVA ($)'].sum()
+                        total_p_tot = df_purch['Total ($)'].sum()
+                        st.markdown(f"**Totales Compras:** Subtotal: **${total_p_val:,.2f}** | IVA: **${total_p_iva:,.2f}** | **Total General: ${total_p_tot:,.2f}**")
+                    else:
+                        st.text("Sin registros detallados de compras.")
         else:
             st.warning("Aún no has registrado envíos de documentos en el portal.")
 
