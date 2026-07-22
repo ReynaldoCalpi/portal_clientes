@@ -3,6 +3,8 @@ import pandas as pd
 from datetime import datetime
 import json
 import os
+import io
+import zipfile
 
 # Configuración de la página
 st.set_page_config(
@@ -53,6 +55,19 @@ def save_files_to_folder(file_list, client_name, periodo_str, category):
             "path": file_path
         })
     return saved_files_info
+
+def create_zip_buffer(json_list, pdf_list):
+    """Crea un archivo ZIP en memoria con los JSONs y PDFs proporcionados."""
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for file_info in (json_list or []):
+            if os.path.exists(file_info['path']):
+                zip_file.write(file_info['path'], arcname=file_info['name'])
+        for file_info in (pdf_list or []):
+            if os.path.exists(file_info['path']):
+                zip_file.write(file_info['path'], arcname=file_info['name'])
+    zip_buffer.seek(0)
+    return zip_buffer.getvalue()
 
 # --- Inicialización de Estados de Sesión ---
 if "logged_in" not in st.session_state:
@@ -120,39 +135,35 @@ def admin_dashboard():
                     
                     with col_d1:
                         st.markdown("**📈 Ventas:**")
-                        if envio.get('sales_json_list'):
-                            st.text(f"JSONs de Ventas ({len(envio['sales_json_list'])} archivos):")
-                            for f_idx, file_info in enumerate(envio['sales_json_list']):
-                                if os.path.exists(file_info['path']):
-                                    with open(file_info['path'], "rb") as f_bytes:
-                                        st.download_button(f"📥 {file_info['name']}", f_bytes.read(), file_name=file_info['name'], key=f"s_j_{idx}_{f_idx}")
+                        has_sales = envio.get('sales_json_list') or envio.get('sales_pdf_list')
+                        if has_sales:
+                            zip_sales_bytes = create_zip_buffer(envio.get('sales_json_list'), envio.get('sales_pdf_list'))
+                            safe_client_name = envio['client'].replace(" ", "_").replace(".", "")
+                            st.download_button(
+                                label="📦 Descargar todas las Ventas (ZIP)",
+                                data=zip_sales_bytes,
+                                file_name=f"Ventas_{safe_client_name}_{envio['periodo'].replace(' ', '_')}.zip",
+                                mime="application/zip",
+                                key=f"zip_sales_{idx}"
+                            )
                         else:
-                            st.text("Sin JSON de ventas")
+                            st.text("Sin archivos de ventas")
                             
-                        if envio.get('sales_pdf_list'):
-                            st.text(f"PDFs/Resguardos Ventas ({len(envio['sales_pdf_list'])} archivos):")
-                            for f_idx, file_info in enumerate(envio['sales_pdf_list']):
-                                if os.path.exists(file_info['path']):
-                                    with open(file_info['path'], "rb") as f_bytes:
-                                        st.download_button(f"📥 {file_info['name']}", f_bytes.read(), file_name=file_info['name'], key=f"s_p_{idx}_{f_idx}")
-                                
                     with col_d2:
-                        st.markdown("**📉 Compras:**")
-                        if envio.get('purch_json_list'):
-                            st.text(f"JSONs de Compras ({len(envio['purch_json_list'])} archivos):")
-                            for f_idx, file_info in enumerate(envio['purch_json_list']):
-                                if os.path.exists(file_info['path']):
-                                    with open(file_info['path'], "rb") as f_bytes:
-                                        st.download_button(f"📥 {file_info['name']}", f_bytes.read(), file_name=file_info['name'], key=f"p_j_{idx}_{f_idx}")
+                        st.markdown("**📉 Compras y Gastos:**")
+                        has_purch = envio.get('purch_json_list') or envio.get('purch_pdf_list')
+                        if has_purch:
+                            zip_purch_bytes = create_zip_buffer(envio.get('purch_json_list'), envio.get('purch_pdf_list'))
+                            safe_client_name = envio['client'].replace(" ", "_").replace(".", "")
+                            st.download_button(
+                                label="📦 Descargar todas las Compras (ZIP)",
+                                data=zip_purch_bytes,
+                                file_name=f"Compras_{safe_client_name}_{envio['periodo'].replace(' ', '_')}.zip",
+                                mime="application/zip",
+                                key=f"zip_purch_{idx}"
+                            )
                         else:
-                            st.text("Sin JSON de compras")
-                            
-                        if envio.get('purch_pdf_list'):
-                            st.text(f"PDFs de Compras ({len(envio['purch_pdf_list'])} archivos):")
-                            for f_idx, file_info in enumerate(envio['purch_pdf_list']):
-                                if os.path.exists(file_info['path']):
-                                    with open(file_info['path'], "rb") as f_bytes:
-                                        st.download_button(f"📥 {file_info['name']}", f_bytes.read(), file_name=file_info['name'], key=f"p_p_{idx}_{f_idx}")
+                            st.text("Sin archivos de compras")
         else:
             st.info(f"No hay documentos registrados para el periodo {periodo_seleccionado} todavía.")
 
@@ -241,7 +252,6 @@ def client_dashboard():
                     if json_valido:
                         periodo_str = f"{mes} {anio}"
                         
-                        # Guardar archivos físicamente en el disco
                         s_json_saved = save_files_to_folder(sales_json, st.session_state.username, periodo_str, "sales_json")
                         s_pdf_saved = save_files_to_folder(sales_pdf, st.session_state.username, periodo_str, "sales_pdf")
                         p_json_saved = save_files_to_folder(purch_json, st.session_state.username, periodo_str, "purch_json")
