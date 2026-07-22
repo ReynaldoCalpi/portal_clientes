@@ -50,7 +50,7 @@ def login_screen():
                 else:
                     st.error("Usuario o contraseña incorrectos.")
 
-# --- Panel de Administración (Actualizado con Auditoría de Archivos) ---
+# --- Panel de Administración (Fase 1 y 2 Intactas) ---
 def admin_dashboard():
     st.title("🎛️ Panel de Control - Administrador")
     st.markdown("Supervisa el cumplimiento fiscal, administra cuentas y revisa los documentos cargados.")
@@ -67,8 +67,6 @@ def admin_dashboard():
             filtro_anio = st.selectbox("Filtrar por Año", [2026, 2025], index=0)
             
         periodo_seleccionado = f"{filtro_mes} {filtro_anio}"
-        
-        # Mostrar envíos reales realizados en este periodo
         envios_periodo = [s for s in st.session_state.submissions if s["periodo"] == periodo_seleccionado]
         
         if envios_periodo:
@@ -127,53 +125,74 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-# --- Panel del Cliente (Intacto y Operativo) ---
+# --- Panel del Cliente (Fase 3: Carga + Historial del Contribuyente) ---
 def client_dashboard():
-    st.title(f"📁 Carga de Documentos - {st.session_state.username}")
-    st.markdown("Sube tus archivos JSON y PDFs correspondientes al periodo fiscal.")
+    st.title(f"📁 Portal de Contribuyente — {st.session_state.username}")
+    st.markdown("Sube tus archivos JSON y PDFs correspondientes al periodo fiscal en curso de forma segura.")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        mes = st.selectbox("Mes Fiscal", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=6)
-    with col2:
-        anio = st.selectbox("Año Fiscal", [2026, 2025], index=0)
-        
-    st.divider()
+    # Pestañas para el cliente
+    client_tab1, client_tab2 = st.tabs(["📤 Cargar Documentos del Periodo", "📜 Mi Historial de Envíos"])
     
-    with st.form("upload_form"):
-        col_v, col_c = st.columns(2)
-        
-        with col_v:
-            st.subheader("📈 Ventas")
-            sales_json = st.file_uploader("Archivo JSON de Ventas (DTEs)", type=["json"], key="s_json")
-            sales_pdf = st.file_uploader("PDFs de Resguardo / Ventas", type=["pdf", "zip"], key="s_pdf")
-
-        with col_c:
-            st.subheader("📉 Compras y Gastos")
-            purch_json = st.file_uploader("Archivo JSON de Compras", type=["json"], key="p_json")
-            purch_pdf = st.file_uploader("PDFs de Compras y Gastos", type=["pdf", "zip"], key="p_pdf")
+    with client_tab1:
+        col1, col2 = st.columns(2)
+        with col1:
+            mes = st.selectbox("Mes Fiscal", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=6)
+        with col2:
+            anio = st.selectbox("Año Fiscal", [2026, 2025], index=0)
             
-        submit_files = st.form_submit_button("🚀 Enviar Documentación a RI Consultores", use_container_width=True)
+        st.divider()
         
-        if submit_files:
-            if sales_json or purch_json:
-                periodo_str = f"{mes} {anio}"
-                st.session_state.submissions.append({
-                    "client": st.session_state.username,
-                    "periodo": periodo_str,
-                    "sales_json": sales_json,
-                    "sales_name": sales_json.name if sales_json else None,
-                    "sales_pdf": sales_pdf,
-                    "sales_pdf_name": sales_pdf.name if sales_pdf else None,
-                    "purch_json": purch_json,
-                    "purch_name": purch_json.name if purch_json else None,
-                    "purch_pdf": purch_pdf,
-                    "purch_pdf_name": purch_pdf.name if purch_pdf else None,
-                    "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
-                })
-                st.success(f"¡Documentos para el periodo {periodo_str} enviados correctamente!")
-            else:
-                st.warning("Adjunta al menos un archivo JSON principal.")
+        with st.form("upload_form"):
+            col_v, col_c = st.columns(2)
+            
+            with col_v:
+                st.subheader("📈 Ventas")
+                sales_json = st.file_uploader("Archivo JSON de Ventas (DTEs)", type=["json"], key="s_json")
+                sales_pdf = st.file_uploader("PDFs de Resguardo / Ventas", type=["pdf", "zip"], key="s_pdf")
+
+            with col_c:
+                st.subheader("📉 Compras y Gastos")
+                purch_json = st.file_uploader("Archivo JSON de Compras", type=["json"], key="p_json")
+                purch_pdf = st.file_uploader("PDFs de Compras y Gastos", type=["pdf", "zip"], key="p_pdf")
+                
+            submit_files = st.form_submit_button("🚀 Enviar Documentación a RI Consultores", use_container_width=True)
+            
+            if submit_files:
+                if sales_json or purch_json:
+                    periodo_str = f"{mes} {anio}"
+                    st.session_state.submissions.append({
+                        "client": st.session_state.username,
+                        "periodo": periodo_str,
+                        "sales_json": sales_json,
+                        "sales_name": sales_json.name if sales_json else None,
+                        "sales_pdf": sales_pdf,
+                        "sales_pdf_name": sales_pdf.name if sales_pdf else None,
+                        "purch_json": purch_json,
+                        "purch_name": purch_json.name if purch_json else None,
+                        "purch_pdf": purch_pdf,
+                        "purch_pdf_name": purch_pdf.name if purch_pdf else None,
+                        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+                    })
+                    st.success(f"¡Documentos para el periodo {periodo_str} enviados correctamente a RI Consultores!")
+                else:
+                    st.warning("Adjunta al menos un archivo JSON principal.")
+
+    with client_tab2:
+        st.subheader("Historial de Declaraciones y Envíos Realizados")
+        # Filtrar solo los envíos de este cliente logueado
+        mis_envios = [s for s in st.session_state.submissions if s["client"] == st.session_state.username]
+        
+        if mis_envios:
+            st.info("Aquí puedes verificar los comprobantes que ya has entregado en periodos anteriores.")
+            for envio in mis_envios:
+                with st.expander(f"📅 Periodo: {envio['periodo']} (Enviado el {envio['fecha']})"):
+                    st.markdown(f"- **Ventas (JSON):** {envio['sales_name'] if envio['sales_json'] else 'No adjunto'}")
+                    st.markdown(f"- **Ventas (PDF):** {envio['sales_pdf_name'] if envio['sales_pdf'] else 'No adjunto'}")
+                    st.markdown(f"- **Compras (JSON):** {envio['purch_name'] if envio['purch_json'] else 'No adjunto'}")
+                    st.markdown(f"- **Compras (PDF):** {envio['purch_pdf_name'] if envio['purch_pdf'] else 'No adjunto'}")
+                    st.success("Estatus: Entregado y registrado con éxito.")
+        else:
+            st.warning("Aún no has registrado envíos de documentos en el portal.")
 
 # --- Control de Sesión ---
 if not st.session_state.logged_in:
