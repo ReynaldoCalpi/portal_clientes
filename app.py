@@ -70,7 +70,7 @@ def create_zip_buffer(json_list, pdf_list):
     return zip_buffer.getvalue()
 
 def extract_invoice_summary(file_list):
-    """Extrae el número de control (priorizando DTE-03), valor, iva y total desde el JSON."""
+    """Extrae el número de control (DTE-03), valor, iva y total con validación robusta y ecuaciones cruzadas."""
     summary_data = []
     if not file_list:
         return pd.DataFrame()
@@ -90,14 +90,12 @@ def extract_invoice_summary(file_list):
                     if nc_root and str(nc_root).startswith("DTE-03"):
                         doc_num = nc_root
                         
-                    if not doc_num:
-                        ident = item.get("identificacion", {})
-                        if isinstance(ident, dict):
-                            nc_ident = ident.get("numeroControl")
-                            if nc_ident and str(nc_ident).startswith("DTE-03"):
-                                doc_num = nc_ident
+                    ident = item.get("identificacion", {})
+                    if not doc_num and isinstance(ident, dict):
+                        nc_ident = ident.get("numeroControl")
+                        if nc_ident and str(nc_ident).startswith("DTE-03"):
+                            doc_num = nc_ident
                                 
-                    # Fallback general si no encuentra el DTE-03 exacto
                     if not doc_num:
                         doc_num = (
                             nc_root or 
@@ -108,20 +106,75 @@ def extract_invoice_summary(file_list):
                         )
                     
                     resumen = item.get("resumen", {})
-                    if isinstance(resumen, dict):
-                        val = resumen.get("totalGravada") or resumen.get("subTotal") or resumen.get("montoTotalOperacion") or 0.0
-                        iva = resumen.get("totalIva") or resumen.get("ivaRenta") or 0.0
-                        total = resumen.get("totalPagar") or resumen.get("montoTotalOperacion") or 0.0
-                    else:
-                        val = item.get("valor") or item.get("subtotal") or 0.0
-                        iva = item.get("iva") or 0.0
-                        total = item.get("total") or 0.0
+                    if not isinstance(resumen, dict):
+                        resumen = {}
+                    
+                    # Extracción de Valor / Gravada / Subtotal
+                    val = (
+                        resumen.get("totalGravada") or 
+                        resumen.get("subTotal") or 
+                        resumen.get("subTotalVentas") or 
+                        resumen.get("montoTotalOperacion") or 
+                        item.get("totalGravada") or
+                        item.get("subtotal") or 
+                        item.get("valor") or 
+                        0.0
+                    )
+                    
+                    # Extracción de IVA (incluyendo campos directos o búsqueda en matriz de tributos)
+                    iva = (
+                        resumen.get("totalIva") or 
+                        resumen.get("iva") or 
+                        resumen.get("ivaRenta") or 
+                        resumen.get("ivaPerci1") or 
+                        resumen.get("ivaRete1") or 
+                        item.get("totalIva") or 
+                        item.get("iva") or 
+                        0.0
+                    )
+                    
+                    if not iva and "tributos" in resumen and isinstance(resumen["tributos"], list):
+                        iva_tributos = 0.0
+                        for trib in resumen["tributos"]:
+                            if isinstance(trib, dict):
+                                val_trib = trib.get("valor") or trib.get("valTributo") or 0.0
+                                try:
+                                    iva_tributos += float(val_trib)
+                                except:
+                                    pass
+                        if iva_tributos > 0:
+                            iva = iva_tributos
+
+                    # Extracción de Total a Pagar
+                    total = (
+                        resumen.get("totalPagar") or 
+                        resumen.get("montoTotalOperacion") or 
+                        resumen.get("total") or 
+                        item.get("totalPagar") or 
+                        item.get("total") or 
+                        0.0
+                    )
+                    
+                    # Ecuaciones de validación y balance financiero cruzado
+                    try:
+                        val_f = float(val) if val is not None else 0.0
+                        iva_f = float(iva) if iva is not None else 0.0
+                        total_f = float(total) if total is not None else 0.0
+                        
+                        # Si el total no viene explícito, se calcula sumando valor + iva
+                        if total_f == 0.0 and val_f > 0.0:
+                            total_f = val_f + iva_f
+                        # Si el valor no viene explícito, se deduce restando total - iva
+                        elif val_f == 0.0 and total_f > 0.0 and iva_f > 0.0:
+                            val_f = total_f - iva_f
+                    except:
+                        val_f, iva_f, total_f = 0.0, 0.0, 0.0
                         
                     summary_data.append({
-                        "Número de Control": doc_num,
-                        "Valor": float(val) if val else 0.0,
-                        "IVA": float(iva) if iva else 0.0,
-                        "Total": float(total) if total else 0.0
+                        "Número de Control": str(doc_num),
+                        "Valor": val_f,
+                        "IVA": iva_f,
+                        "Total": total_f
                     })
             except Exception:
                 summary_data.append({
