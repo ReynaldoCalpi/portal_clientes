@@ -70,7 +70,7 @@ def create_zip_buffer(json_list, pdf_list):
     return zip_buffer.getvalue()
 
 def extract_invoice_summary(file_list):
-    """Extrae de los archivos JSON el número de documento, valor, iva y total para la tabla."""
+    """Extrae el número de control, valor, iva y total desde el JSON para la tabla."""
     summary_data = []
     if not file_list:
         return pd.DataFrame()
@@ -84,11 +84,11 @@ def extract_invoice_summary(file_list):
                 
                 items = content if isinstance(content, list) else [content]
                 for item in items:
+                    # Extracción estricta priorizando el número de control del JSON
                     doc_num = (
                         item.get("numeroControl") or 
                         item.get("codigoGeneracion") or 
                         item.get("numDocumento") or 
-                        item.get("numero") or 
                         file_info["name"]
                     )
                     
@@ -103,17 +103,17 @@ def extract_invoice_summary(file_list):
                         total = item.get("total") or 0.0
                         
                     summary_data.append({
-                        "Documento": doc_num,
-                        "Valor ($)": float(val) if val else 0.0,
-                        "IVA ($)": float(iva) if iva else 0.0,
-                        "Total ($)": float(total) if total else 0.0
+                        "Número de Control": doc_num,
+                        "Valor": float(val) if val else 0.0,
+                        "IVA": float(iva) if iva else 0.0,
+                        "Total": float(total) if total else 0.0
                     })
             except Exception:
                 summary_data.append({
-                    "Documento": file_info["name"],
-                    "Valor ($)": 0.0,
-                    "IVA ($)": 0.0,
-                    "Total ($)": 0.0
+                    "Número de Control": file_info["name"],
+                    "Valor": 0.0,
+                    "IVA": 0.0,
+                    "Total": 0.0
                 })
     return pd.DataFrame(summary_data)
 
@@ -259,7 +259,7 @@ def client_dashboard():
     st.title(f"📁 Portal de Contribuyente — {st.session_state.username}")
     st.markdown("Arrastra y suelta múltiples archivos JSON y PDFs correspondientes al periodo en curso.")
     
-    client_tab1, client_tab2 = st.tabs(["📤 Cargar Documentos (Múltiples)", "📜 Mi Historial y Resumen Financiero"])
+    client_tab1, client_tab2 = st.tabs(["📤 Cargar Documentos (Múltiples)", "📊 Historial y Resumen Financiero"])
     
     with client_tab1:
         col1, col2 = st.columns(2)
@@ -332,42 +332,70 @@ def client_dashboard():
                     st.warning("Adjunta al menos un archivo JSON principal antes de enviar.")
 
     with client_tab2:
-        st.subheader("📜 Historial de Declaraciones y Detalle de Documentos")
+        st.subheader("📊 Historial de Declaraciones y Reporte Detallado")
         all_submissions = load_submissions()
         mis_envios = [s for s in all_submissions if s["client"] == st.session_state.username]
         
         if mis_envios:
-            st.info("Aquí puedes verificar los comprobantes entregados y consultar el detalle de valores e IVA por cada periodo.")
+            st.info("Visualiza el detalle de tus documentos fiscales, números de control e importes correspondientes por cada periodo.")
             for envio in mis_envios:
-                with st.expander(f"📅 Periodo: {envio['periodo']} (Enviado el {envio['fecha']})"):
+                with st.expander(f"📅 Periodo: {envio['periodo']} — Entregado el {envio['fecha']}"):
                     
-                    # Resumen de Ventas
-                    st.markdown("##### 📈 Detalle de Ventas Registradas")
+                    # --- Sección de Ventas ---
+                    st.markdown("---")
+                    st.markdown("##### 📈 Reporte Detallado de Ventas")
                     df_sales = extract_invoice_summary(envio.get('sales_json_list'))
                     if not df_sales.empty:
-                        st.dataframe(df_sales, use_container_width=True)
-                        total_v_val = df_sales['Valor ($)'].sum()
-                        total_v_iva = df_sales['IVA ($)'].sum()
-                        total_v_tot = df_sales['Total ($)'].sum()
-                        st.markdown(f"**Totales Ventas:** Subtotal: **${total_v_val:,.2f}** | IVA: **${total_v_iva:,.2f}** | **Total General: ${total_v_tot:,.2f}**")
-                    else:
-                        st.text("Sin registros detallados de ventas.")
+                        # Métricas rápidas y coloridas
+                        v_val = df_sales['Valor'].sum()
+                        v_iva = df_sales['IVA'].sum()
+                        v_tot = df_sales['Total'].sum()
                         
-                    st.divider()
-                    
-                    # Resumen de Compras
-                    st.markdown("##### 📉 Detalle de Compras y Gastos Registrados")
+                        col_m1, col_m2, col_m3 = st.columns(3)
+                        col_m1.metric("Subtotal Ventas", f"${v_val:,.2f}")
+                        col_m2.metric("IVA Ventas", f"${v_iva:,.2f}")
+                        col_m3.metric("Total Ventas", f"${v_tot:,.2f}")
+                        
+                        # Tabla con formato monetario profesional $$
+                        st.dataframe(
+                            df_sales.style.format({
+                                "Valor": "${:,.2f}",
+                                "IVA": "${:,.2f}",
+                                "Total": "${:,.2f}"
+                            }),
+                            use_container_width=True
+                        )
+                    else:
+                        st.text("Sin registros de ventas detallados para este periodo.")
+                        
+                    # --- Sección de Compras ---
+                    st.markdown("---")
+                    st.markdown("##### 📉 Reporte Detallado de Compras y Gastos")
                     df_purch = extract_invoice_summary(envio.get('purch_json_list'))
                     if not df_purch.empty:
-                        st.dataframe(df_purch, use_container_width=True)
-                        total_p_val = df_purch['Valor ($)'].sum()
-                        total_p_iva = df_purch['IVA ($)'].sum()
-                        total_p_tot = df_purch['Total ($)'].sum()
-                        st.markdown(f"**Totales Compras:** Subtotal: **${total_p_val:,.2f}** | IVA: **${total_p_iva:,.2f}** | **Total General: ${total_p_tot:,.2f}**")
+                        # Métricas rápidas y coloridas
+                        p_val = df_purch['Valor'].sum()
+                        p_iva = df_purch['IVA'].sum()
+                        p_tot = df_purch['Total'].sum()
+                        
+                        col_pm1, col_pm2, col_pm3 = st.columns(3)
+                        col_pm1.metric("Subtotal Compras", f"${p_val:,.2f}")
+                        col_pm2.metric("IVA Compras", f"${p_iva:,.2f}")
+                        col_pm3.metric("Total Compras", f"${p_tot:,.2f}")
+                        
+                        # Tabla con formato monetario profesional $$
+                        st.dataframe(
+                            df_purch.style.format({
+                                "Valor": "${:,.2f}",
+                                "IVA": "${:,.2f}",
+                                "Total": "${:,.2f}"
+                            }),
+                            use_container_width=True
+                        )
                     else:
-                        st.text("Sin registros detallados de compras.")
+                        st.text("Sin registros de compras detallados para este periodo.")
         else:
-            st.warning("Aún no has registrado envíos de documentos en el portal.")
+            st.warning("⚠️ Aún no has registrado envíos de documentos en el portal.")
 
 # --- Control de Sesión ---
 if not st.session_state.logged_in:
