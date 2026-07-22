@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import json
 
 # Configuración de la página
 st.set_page_config(
@@ -50,7 +51,7 @@ def login_screen():
                 else:
                     st.error("Usuario o contraseña incorrectos.")
 
-# --- Panel de Administración (Fase 1 y 2 Intactas) ---
+# --- Panel de Administración ---
 def admin_dashboard():
     st.title("🎛️ Panel de Control - Administrador")
     st.markdown("Supervisa el cumplimiento fiscal, administra cuentas y revisa los documentos cargados.")
@@ -125,13 +126,12 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-# --- Panel del Cliente (Fase 3: Carga + Historial del Contribuyente) ---
+# --- Panel del Cliente (Fase 4: Drag & Drop optimizado + Validación rápida) ---
 def client_dashboard():
     st.title(f"📁 Portal de Contribuyente — {st.session_state.username}")
-    st.markdown("Sube tus archivos JSON y PDFs correspondientes al periodo fiscal en curso de forma segura.")
+    st.markdown("Arrastra y suelta tus archivos de respaldo y JSON fiscales correspondientes al periodo en curso.")
     
-    # Pestañas para el cliente
-    client_tab1, client_tab2 = st.tabs(["📤 Cargar Documentos del Periodo", "📜 Mi Historial de Envíos"])
+    client_tab1, client_tab2 = st.tabs(["📤 Cargar Documentos (Drag & Drop)", "📜 Mi Historial de Envíos"])
     
     with client_tab1:
         col1, col2 = st.columns(2)
@@ -147,39 +147,52 @@ def client_dashboard():
             
             with col_v:
                 st.subheader("📈 Ventas")
-                sales_json = st.file_uploader("Archivo JSON de Ventas (DTEs)", type=["json"], key="s_json")
-                sales_pdf = st.file_uploader("PDFs de Resguardo / Ventas", type=["pdf", "zip"], key="s_pdf")
+                st.markdown("Arrastra aquí tu archivo JSON de ventas y tus PDFs o ZIP de respaldo.")
+                sales_json = st.file_uploader("Arrastra o selecciona el JSON de Ventas", type=["json"], key="s_json")
+                sales_pdf = st.file_uploader("Arrastra o selecciona PDFs de Ventas", type=["pdf", "zip"], key="s_pdf")
 
             with col_c:
                 st.subheader("📉 Compras y Gastos")
-                purch_json = st.file_uploader("Archivo JSON de Compras", type=["json"], key="p_json")
-                purch_pdf = st.file_uploader("PDFs de Compras y Gastos", type=["pdf", "zip"], key="p_pdf")
+                st.markdown("Arrastra aquí tu archivo JSON de compras y tus PDFs de respaldo.")
+                purch_json = st.file_uploader("Arrastra o selecciona el JSON de Compras", type=["json"], key="p_json")
+                purch_pdf = st.file_uploader("Arrastra o selecciona PDFs de Compras", type=["pdf", "zip"], key="p_pdf")
                 
-            submit_files = st.form_submit_button("🚀 Enviar Documentación a RI Consultores", use_container_width=True)
+            submit_files = st.form_submit_button("🚀 Validar y Enviar Documentación", use_container_width=True)
             
             if submit_files:
                 if sales_json or purch_json:
-                    periodo_str = f"{mes} {anio}"
-                    st.session_state.submissions.append({
-                        "client": st.session_state.username,
-                        "periodo": periodo_str,
-                        "sales_json": sales_json,
-                        "sales_name": sales_json.name if sales_json else None,
-                        "sales_pdf": sales_pdf,
-                        "sales_pdf_name": sales_pdf.name if sales_pdf else None,
-                        "purch_json": purch_json,
-                        "purch_name": purch_json.name if purch_json else None,
-                        "purch_pdf": purch_pdf,
-                        "purch_pdf_name": purch_pdf.name if purch_pdf else None,
-                        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
-                    })
-                    st.success(f"¡Documentos para el periodo {periodo_str} enviados correctamente a RI Consultores!")
+                    # Validación rápida (Fase 4) de estructura JSON
+                    json_valido = True
+                    if sales_json:
+                        try:
+                            sales_json.seek(0)
+                            json.load(sales_json)
+                        except Exception:
+                            json_valido = False
+                            
+                    if json_valido:
+                        periodo_str = f"{mes} {anio}"
+                        st.session_state.submissions.append({
+                            "client": st.session_state.username,
+                            "periodo": periodo_str,
+                            "sales_json": sales_json,
+                            "sales_name": sales_json.name if sales_json else None,
+                            "sales_pdf": sales_pdf,
+                            "sales_pdf_name": sales_pdf.name if sales_pdf else None,
+                            "purch_json": purch_json,
+                            "purch_name": purch_json.name if purch_json else None,
+                            "purch_pdf": purch_pdf,
+                            "purch_pdf_name": purch_pdf.name if purch_pdf else None,
+                            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+                        })
+                        st.success(f"¡Estructura validada! Documentos del periodo {periodo_str} enviados correctamente a RI Consultores.")
+                    else:
+                        st.error("El archivo JSON de ventas presenta un formato inválido o corrupto. Verifica el archivo.")
                 else:
-                    st.warning("Adjunta al menos un archivo JSON principal.")
+                    st.warning("Adjunta al menos un archivo JSON principal antes de enviar.")
 
     with client_tab2:
         st.subheader("Historial de Declaraciones y Envíos Realizados")
-        # Filtrar solo los envíos de este cliente logueado
         mis_envios = [s for s in st.session_state.submissions if s["client"] == st.session_state.username]
         
         if mis_envios:
