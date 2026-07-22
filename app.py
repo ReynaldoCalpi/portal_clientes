@@ -70,7 +70,7 @@ def create_zip_buffer(json_list, pdf_list):
     return zip_buffer.getvalue()
 
 def extract_invoice_summary(file_list):
-    """Extrae el número de control, valor, iva y total desde el JSON para la tabla."""
+    """Extrae el número de control (priorizando DTE-03), valor, iva y total desde el JSON."""
     summary_data = []
     if not file_list:
         return pd.DataFrame()
@@ -84,13 +84,28 @@ def extract_invoice_summary(file_list):
                 
                 items = content if isinstance(content, list) else [content]
                 for item in items:
-                    # Extracción estricta priorizando el número de control del JSON
-                    doc_num = (
-                        item.get("numeroControl") or 
-                        item.get("codigoGeneracion") or 
-                        item.get("numDocumento") or 
-                        file_info["name"]
-                    )
+                    # Búsqueda estructurada del número de control comenzando con DTE-03
+                    doc_num = None
+                    nc_root = item.get("numeroControl")
+                    if nc_root and str(nc_root).startswith("DTE-03"):
+                        doc_num = nc_root
+                        
+                    if not doc_num:
+                        ident = item.get("identificacion", {})
+                        if isinstance(ident, dict):
+                            nc_ident = ident.get("numeroControl")
+                            if nc_ident and str(nc_ident).startswith("DTE-03"):
+                                doc_num = nc_ident
+                                
+                    # Fallback general si no encuentra el DTE-03 exacto
+                    if not doc_num:
+                        doc_num = (
+                            nc_root or 
+                            (ident.get("numeroControl") if isinstance(ident, dict) else None) or
+                            item.get("codigoGeneracion") or 
+                            item.get("numDocumento") or 
+                            file_info["name"]
+                        )
                     
                     resumen = item.get("resumen", {})
                     if isinstance(resumen, dict):
@@ -337,7 +352,7 @@ def client_dashboard():
         mis_envios = [s for s in all_submissions if s["client"] == st.session_state.username]
         
         if mis_envios:
-            st.info("Visualiza el detalle de tus documentos fiscales, números de control e importes correspondientes por cada periodo.")
+            st.info("Visualiza el detalle de tus documentos fiscales, números de control (DTE-03) e importes correspondientes por cada periodo.")
             for envio in mis_envios:
                 with st.expander(f"📅 Periodo: {envio['periodo']} — Entregado el {envio['fecha']}"):
                     
@@ -346,7 +361,6 @@ def client_dashboard():
                     st.markdown("##### 📈 Reporte Detallado de Ventas")
                     df_sales = extract_invoice_summary(envio.get('sales_json_list'))
                     if not df_sales.empty:
-                        # Métricas rápidas y coloridas
                         v_val = df_sales['Valor'].sum()
                         v_iva = df_sales['IVA'].sum()
                         v_tot = df_sales['Total'].sum()
@@ -356,7 +370,6 @@ def client_dashboard():
                         col_m2.metric("IVA Ventas", f"${v_iva:,.2f}")
                         col_m3.metric("Total Ventas", f"${v_tot:,.2f}")
                         
-                        # Tabla con formato monetario profesional $$
                         st.dataframe(
                             df_sales.style.format({
                                 "Valor": "${:,.2f}",
@@ -373,7 +386,6 @@ def client_dashboard():
                     st.markdown("##### 📉 Reporte Detallado de Compras y Gastos")
                     df_purch = extract_invoice_summary(envio.get('purch_json_list'))
                     if not df_purch.empty:
-                        # Métricas rápidas y coloridas
                         p_val = df_purch['Valor'].sum()
                         p_iva = df_purch['IVA'].sum()
                         p_tot = df_purch['Total'].sum()
@@ -383,7 +395,6 @@ def client_dashboard():
                         col_pm2.metric("IVA Compras", f"${p_iva:,.2f}")
                         col_pm3.metric("Total Compras", f"${p_tot:,.2f}")
                         
-                        # Tabla con formato monetario profesional $$
                         st.dataframe(
                             df_purch.style.format({
                                 "Valor": "${:,.2f}",
