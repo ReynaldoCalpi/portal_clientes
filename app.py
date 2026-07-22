@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import json
+import os
 
 # Configuración de la página
 st.set_page_config(
@@ -10,9 +11,48 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Lista Global Compartida entre Sesiones (Servidor) ---
-if 'PERSISTENT_SUBMISSIONS' not in globals():
-    PERSISTENT_SUBMISSIONS = []
+# --- Configuración de Persistencia en Disco ---
+DB_FILE = "submissions_db.json"
+UPLOAD_DIR = "uploaded_files"
+
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR)
+
+def load_submissions():
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def save_submission_to_disk(submission_data):
+    submissions = load_submissions()
+    submissions.append(submission_data)
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(submissions, f, ensure_ascii=False, indent=4)
+
+def save_files_to_folder(file_list, client_name, periodo_str, category):
+    saved_files_info = []
+    if not file_list:
+        return saved_files_info
+        
+    safe_client = client_name.replace(" ", "_").replace(".", "")
+    safe_periodo = periodo_str.replace(" ", "_")
+    folder_path = os.path.join(UPLOAD_DIR, safe_client, safe_periodo, category)
+    os.makedirs(folder_path, exist_ok=True)
+    
+    for file_obj in file_list:
+        file_path = os.path.join(folder_path, file_obj.name)
+        file_obj.seek(0)
+        with open(file_path, "wb") as f:
+            f.write(file_obj.getbuffer())
+        saved_files_info.append({
+            "name": file_obj.name,
+            "path": file_path
+        })
+    return saved_files_info
 
 # --- Inicialización de Estados de Sesión ---
 if "logged_in" not in st.session_state:
@@ -69,7 +109,8 @@ def admin_dashboard():
             filtro_anio = st.selectbox("Filtrar por Año", [2026, 2025], index=0)
             
         periodo_seleccionado = f"{filtro_mes} {filtro_anio}"
-        envios_periodo = [s for s in PERSISTENT_SUBMISSIONS if s["periodo"] == periodo_seleccionado]
+        all_submissions = load_submissions()
+        envios_periodo = [s for s in all_submissions if s["periodo"] == periodo_seleccionado]
         
         if envios_periodo:
             st.success(f"Se encontraron {len(envios_periodo)} entregas para el periodo {periodo_seleccionado}.")
@@ -81,33 +122,37 @@ def admin_dashboard():
                         st.markdown("**📈 Ventas:**")
                         if envio.get('sales_json_list'):
                             st.text(f"JSONs de Ventas ({len(envio['sales_json_list'])} archivos):")
-                            for f_idx, file_obj in enumerate(envio['sales_json_list']):
-                                file_obj.seek(0)
-                                st.download_button(f"📥 {file_obj.name}", file_obj.getvalue(), file_name=file_obj.name, key=f"s_j_{idx}_{f_idx}")
+                            for f_idx, file_info in enumerate(envio['sales_json_list']):
+                                if os.path.exists(file_info['path']):
+                                    with open(file_info['path'], "rb") as f_bytes:
+                                        st.download_button(f"📥 {file_info['name']}", f_bytes.read(), file_name=file_info['name'], key=f"s_j_{idx}_{f_idx}")
                         else:
                             st.text("Sin JSON de ventas")
                             
                         if envio.get('sales_pdf_list'):
                             st.text(f"PDFs/Resguardos Ventas ({len(envio['sales_pdf_list'])} archivos):")
-                            for f_idx, file_obj in enumerate(envio['sales_pdf_list']):
-                                file_obj.seek(0)
-                                st.download_button(f"📥 {file_obj.name}", file_obj.getvalue(), file_name=file_obj.name, key=f"s_p_{idx}_{f_idx}")
+                            for f_idx, file_info in enumerate(envio['sales_pdf_list']):
+                                if os.path.exists(file_info['path']):
+                                    with open(file_info['path'], "rb") as f_bytes:
+                                        st.download_button(f"📥 {file_info['name']}", f_bytes.read(), file_name=file_info['name'], key=f"s_p_{idx}_{f_idx}")
                                 
                     with col_d2:
                         st.markdown("**📉 Compras:**")
                         if envio.get('purch_json_list'):
                             st.text(f"JSONs de Compras ({len(envio['purch_json_list'])} archivos):")
-                            for f_idx, file_obj in enumerate(envio['purch_json_list']):
-                                file_obj.seek(0)
-                                st.download_button(f"📥 {file_obj.name}", file_obj.getvalue(), file_name=file_obj.name, key=f"p_j_{idx}_{f_idx}")
+                            for f_idx, file_info in enumerate(envio['purch_json_list']):
+                                if os.path.exists(file_info['path']):
+                                    with open(file_info['path'], "rb") as f_bytes:
+                                        st.download_button(f"📥 {file_info['name']}", f_bytes.read(), file_name=file_info['name'], key=f"p_j_{idx}_{f_idx}")
                         else:
                             st.text("Sin JSON de compras")
                             
                         if envio.get('purch_pdf_list'):
                             st.text(f"PDFs de Compras ({len(envio['purch_pdf_list'])} archivos):")
-                            for f_idx, file_obj in enumerate(envio['purch_pdf_list']):
-                                file_obj.seek(0)
-                                st.download_button(f"📥 {file_obj.name}", file_obj.getvalue(), file_name=file_obj.name, key=f"p_p_{idx}_{f_idx}")
+                            for f_idx, file_info in enumerate(envio['purch_pdf_list']):
+                                if os.path.exists(file_info['path']):
+                                    with open(file_info['path'], "rb") as f_bytes:
+                                        st.download_button(f"📥 {file_info['name']}", f_bytes.read(), file_name=file_info['name'], key=f"p_p_{idx}_{f_idx}")
         else:
             st.info(f"No hay documentos registrados para el periodo {periodo_seleccionado} todavía.")
 
@@ -195,15 +240,24 @@ def client_dashboard():
                             
                     if json_valido:
                         periodo_str = f"{mes} {anio}"
-                        PERSISTENT_SUBMISSIONS.append({
+                        
+                        # Guardar archivos físicamente en el disco
+                        s_json_saved = save_files_to_folder(sales_json, st.session_state.username, periodo_str, "sales_json")
+                        s_pdf_saved = save_files_to_folder(sales_pdf, st.session_state.username, periodo_str, "sales_pdf")
+                        p_json_saved = save_files_to_folder(purch_json, st.session_state.username, periodo_str, "purch_json")
+                        p_pdf_saved = save_files_to_folder(purch_pdf, st.session_state.username, periodo_str, "purch_pdf")
+                        
+                        submission_record = {
                             "client": st.session_state.username,
                             "periodo": periodo_str,
-                            "sales_json_list": sales_json,
-                            "sales_pdf_list": sales_pdf,
-                            "purch_json_list": purch_json,
-                            "purch_pdf_list": purch_pdf,
+                            "sales_json_list": s_json_saved,
+                            "sales_pdf_list": s_pdf_saved,
+                            "purch_json_list": p_json_saved,
+                            "purch_pdf_list": p_pdf_saved,
                             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
-                        })
+                        }
+                        
+                        save_submission_to_disk(submission_record)
                         st.success(f"¡Estructura validada! Documentos del periodo {periodo_str} enviados correctamente a RI Consultores.")
                     else:
                         st.error(f"❌ Error en el archivo '{archivo_fallido}': {error_detallado}")
@@ -212,7 +266,8 @@ def client_dashboard():
 
     with client_tab2:
         st.subheader("Historial de Declaraciones y Envíos Realizados")
-        mis_envios = [s for s in PERSISTENT_SUBMISSIONS if s["client"] == st.session_state.username]
+        all_submissions = load_submissions()
+        mis_envios = [s for s in all_submissions if s["client"] == st.session_state.username]
         
         if mis_envios:
             st.info("Aquí puedes verificar los comprobantes que ya has entregado en periodos anteriores.")
