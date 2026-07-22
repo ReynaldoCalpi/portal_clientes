@@ -140,7 +140,7 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-# --- Panel del Cliente (Validación Robusta de JSON) ---
+# --- Panel del Cliente (Validación con Diagnóstico Detallado) ---
 def client_dashboard():
     st.title(f"📁 Portal de Contribuyente — {st.session_state.username}")
     st.markdown("Arrastra y suelta múltiples archivos JSON y PDFs correspondientes al periodo en curso.")
@@ -150,7 +150,7 @@ def client_dashboard():
     with client_tab1:
         col1, col2 = st.columns(2)
         with col1:
-            mes = st.selectbox("Mes Fiscal", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=6)
+            mes = st.selectbox("Mes Fiscal", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=5)
         with col2:
             anio = st.selectbox("Año Fiscal", [2026, 2025], index=0)
             
@@ -174,18 +174,23 @@ def client_dashboard():
             if submit_files:
                 if sales_json or purch_json:
                     json_valido = True
-                    # Validación robusta decodificando UTF-8 con soporte para BOM
+                    archivo_fallido = ""
+                    error_detallado = ""
+                    
+                    # Validar cada archivo JSON cargado con reporte de errores específico
                     for j_file in (sales_json or []) + (purch_json or []):
                         try:
                             j_file.seek(0)
                             content = j_file.read()
                             if isinstance(content, bytes):
-                                text_content = content.decode('utf-8-sig')
+                                text_content = content.decode('utf-8-sig', errors='replace')
                             else:
                                 text_content = content
                             json.loads(text_content)
-                        except Exception:
+                        except Exception as e:
                             json_valido = False
+                            archivo_fallido = j_file.name
+                            error_detallado = str(e)
                             break
                             
                     if json_valido:
@@ -201,7 +206,7 @@ def client_dashboard():
                         })
                         st.success(f"¡Estructura validada! Documentos del periodo {periodo_str} enviados correctamente a RI Consultores.")
                     else:
-                        st.error("Uno o más archivos JSON presentan un formato inválido o corrupto. Verifica tus archivos.")
+                        st.error(f"❌ Error en el archivo '{archivo_fallido}': {error_detallado}")
                 else:
                     st.warning("Adjunta al menos un archivo JSON principal antes de enviar.")
 
