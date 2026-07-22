@@ -77,13 +77,15 @@ if "user_role" not in st.session_state:
 if "username" not in st.session_state:
     st.session_state.username = ""
 
+# --- Base de Datos de Clientes Actualizada ---
 if "clients_db" not in st.session_state:
     st.session_state.clients_db = {
         "admin": {"password": "admin123", "role": "admin", "name": "Administrador General"},
-        "cliente213": {"password": "json321", "role": "client", "name": "Soluciones 503 S.A.S. de C.V."},
-        "Leftech": {"password": "json123", "role": "client", "name": "Leftech"},
-        "Cedillo": {"password": "json421", "role": "client", "name": "Cedillo"},
-        "Distribuidora Libertad": {"password": "json432", "role": "client", "name": "Distribuidora Libertad"}
+        "soluciones_503": {"password": "sol503_2026", "role": "client", "name": "Soluciones 503 S.A.S. de C.V"},
+        "distribuidora_libertad": {"password": "libertad_2026", "role": "client", "name": "Distribuidora Libertad"},
+        "leftech": {"password": "leftech_2026", "role": "client", "name": "Leftech"},
+        "cedillo": {"password": "cedillo_2026", "role": "client", "name": "Cedillo"},
+        "mercadito_rosa": {"password": "rosa_2026", "role": "client", "name": "Mercadito Rosa de Saron AC"}
     }
 
 # --- Pantalla de Login ---
