@@ -140,7 +140,7 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-# --- Panel del Cliente (Soporte Múltiple de Archivos) ---
+# --- Panel del Cliente (Validación Robusta de JSON) ---
 def client_dashboard():
     st.title(f"📁 Portal de Contribuyente — {st.session_state.username}")
     st.markdown("Arrastra y suelta múltiples archivos JSON y PDFs correspondientes al periodo en curso.")
@@ -174,11 +174,16 @@ def client_dashboard():
             if submit_files:
                 if sales_json or purch_json:
                     json_valido = True
-                    # Validar cada archivo JSON cargado
+                    # Validación robusta decodificando UTF-8 con soporte para BOM
                     for j_file in (sales_json or []) + (purch_json or []):
                         try:
                             j_file.seek(0)
-                            json.load(j_file)
+                            content = j_file.read()
+                            if isinstance(content, bytes):
+                                text_content = content.decode('utf-8-sig')
+                            else:
+                                text_content = content
+                            json.loads(text_content)
                         except Exception:
                             json_valido = False
                             break
