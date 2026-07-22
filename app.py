@@ -10,7 +10,11 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Inicialización de Estados ---
+# --- Lista Global Compartida entre Sesiones (Servidor) ---
+if 'PERSISTENT_SUBMISSIONS' not in globals():
+    PERSISTENT_SUBMISSIONS = []
+
+# --- Inicialización de Estados de Sesión ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "user_role" not in st.session_state:
@@ -24,9 +28,6 @@ if "clients_db" not in st.session_state:
         "comercial_alfa": {"password": "123", "role": "client", "name": "Comercial Alfa S.A. de C.V."},
         "distribuidora_beta": {"password": "123", "role": "client", "name": "Distribuidora Beta"}
     }
-
-if "submissions" not in st.session_state:
-    st.session_state.submissions = []
 
 # --- Pantalla de Login ---
 def login_screen():
@@ -54,7 +55,7 @@ def login_screen():
 # --- Panel de Administración ---
 def admin_dashboard():
     st.title("🎛️ Panel de Control - Administrador")
-    st.markdown("Supervisa el cumplimiento fiscal, administra cuentas y revisa los documentos cargados.")
+    st.markdown("Supervisa el cumplimiento fiscal, administra cuentas y revisa los documentos cargados en tiempo real.")
     
     tab1, tab2, tab3 = st.tabs(["📋 Estatus y Archivos Recibidos", "➕ Crear Nuevo Usuario", "👥 Listado de Cuentas"])
     
@@ -63,12 +64,12 @@ def admin_dashboard():
         
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            filtro_mes = st.selectbox("Filtrar por Mes", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=6)
+            filtro_mes = st.selectbox("Filtrar por Mes", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=5)
         with col_f2:
             filtro_anio = st.selectbox("Filtrar por Año", [2026, 2025], index=0)
             
         periodo_seleccionado = f"{filtro_mes} {filtro_anio}"
-        envios_periodo = [s for s in st.session_state.submissions if s["periodo"] == periodo_seleccionado]
+        envios_periodo = [s for s in PERSISTENT_SUBMISSIONS if s["periodo"] == periodo_seleccionado]
         
         if envios_periodo:
             st.success(f"Se encontraron {len(envios_periodo)} entregas para el periodo {periodo_seleccionado}.")
@@ -140,7 +141,7 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-# --- Panel del Cliente (Validación con Diagnóstico Detallado) ---
+# --- Panel del Cliente ---
 def client_dashboard():
     st.title(f"📁 Portal de Contribuyente — {st.session_state.username}")
     st.markdown("Arrastra y suelta múltiples archivos JSON y PDFs correspondientes al periodo en curso.")
@@ -177,7 +178,6 @@ def client_dashboard():
                     archivo_fallido = ""
                     error_detallado = ""
                     
-                    # Validar cada archivo JSON cargado con reporte de errores específico
                     for j_file in (sales_json or []) + (purch_json or []):
                         try:
                             j_file.seek(0)
@@ -195,7 +195,7 @@ def client_dashboard():
                             
                     if json_valido:
                         periodo_str = f"{mes} {anio}"
-                        st.session_state.submissions.append({
+                        PERSISTENT_SUBMISSIONS.append({
                             "client": st.session_state.username,
                             "periodo": periodo_str,
                             "sales_json_list": sales_json,
@@ -212,7 +212,7 @@ def client_dashboard():
 
     with client_tab2:
         st.subheader("Historial de Declaraciones y Envíos Realizados")
-        mis_envios = [s for s in st.session_state.submissions if s["client"] == st.session_state.username]
+        mis_envios = [s for s in PERSISTENT_SUBMISSIONS if s["client"] == st.session_state.username]
         
         if mis_envios:
             st.info("Aquí puedes verificar los comprobantes que ya has entregado en periodos anteriores.")
