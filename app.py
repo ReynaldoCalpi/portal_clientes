@@ -70,84 +70,136 @@ def create_zip_buffer(json_list, pdf_list):
     return zip_buffer.getvalue()
 
 
-def extract_invoice_summary(file_list):
-    """
-    Extrae de forma robusta los datos clave de los archivos JSON de DTEs de El Salvador,
-    manejando tanto documentos completos como estructuras simplificadas/resumidas.
-    """
-    summary_data = []
-    if not file_list:
-        return pd.DataFrame()
-    
-    for file_info in file_list:
-        path = file_info.get("path")
-        filename = file_info.get("name", "Desconocido")
-        
-        gen_code = "N/A"
-        doc_num = "N/A"
-        val_gravada = 0.0
-        val_descu = 0.0
-        sub_total = 0.0
-        iva_f = 0.0
-        total_f = 0.0
-        
-        if path and os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8-sig") as f:
-                    content = json.load(f)
-                
-                items = content if isinstance(content, list) else [content]
-                for item in items:
-                    if not isinstance(item, dict):
-                        continue
-                        
-                    # 1. Extracción de Identificación
-                    ident = item.get("identificacion", {})
-                    if isinstance(ident, dict):
-                        gen_code = ident.get("codigoGeneracion") or ident.get("codigoGen") or gen_code
-                        doc_num = ident.get("numeroControl") or ident.get("numControl") or doc_num
-                    
-                    if gen_code == "N/A":
-                        gen_code = item.get("codigoGeneracion") or item.get("codigoGen") or item.get("uuid") or "N/A"
-                    if doc_num == "N/A":
-                        doc_num = item.get("numeroControl") or item.get("numControl") or item.get("numeroDte") or "N/A"
-                        
-                    # 2. Extracción de Resumen Financiero
-                    resumen = item.get("resumen", {})
-                    if isinstance(resumen, dict):
-                        val_gravada = float(resumen.get("totalGravada") or 0.0)
-                        val_descu = float(resumen.get("totalDescu") or resumen.get("descuGravada") or 0.0)
-                        sub_total = float(resumen.get("subTotal") or resumen.get("subTotalVentas") or (val_gravada - val_descu))
-                        
-                        # Búsqueda segura del IVA (Tributo código 20)
-                        iva_val = resumen.get("totalIva") or 0.0
-                        if not iva_val or float(iva_val) == 0.0:
-                            tributos = resumen.get("tributos", [])
-                            if isinstance(tributos, list):
-                                for trib in tributos:
-                                    if isinstance(trib, dict):
-                                        if str(trib.get("codigo")) == "20" or "iva" in str(trib.get("descripcion", "")).lower():
-                                            iva_val = trib.get("valor") or iva_val
-                        iva_f = float(iva_val or 0.0)
-                        
-                        # Monto total final a pagar garantizado
-                        total_f = float(resumen.get("totalPagar") or resumen.get("montoTotalOperacion") or resumen.get("total") or (sub_total + iva_f))
+import pandas as pd
 
-            except Exception as e:
-                print(f"Error procesando {filename}: {e}")
-                
-        summary_data.append({
+def extract_invoice_summary(json_list):
+    """
+    Extrae de forma robusta los datos clave de una lista de DTEs (JSONs de Hacienda de El Salvador).
+    Maneja múltiples variantes de estructuras y llaves para garantizar que ningún documento 
+    quede en ceros o con datos faltantes.
+    """
+    rows = []
+    if not json_list:
+        return pd.DataFrame(columns=[
+            "Archivo", "Código de Generación", "Número de Control", 
+            "Venta Gravada", "Descuentos", "SubTotal", "IVA (13%)", "Total a Pagar"
+        ])
+        
+    for item in json_list:
+        # Soportar diccionarios estructurados o contenido directo del JSON
+        if isinstance(item, dict) and ('data' in item or 'json_content' in item):
+            filename = item.get('filename', item.get('archivo', 'DTE_Documento.json'))
+            data = item.get('data', item.get('json_content', item))
+        else:
+            filename = getattr(item, 'name', 'DTE_Documento.json')
+            data = item if isinstance(item, dict) else {}
+
+        # Si el contenido viene como string, parsearlo a diccionario
+        if isinstance(data, str):
+            import json
+            try:
+                data = json.loads(data)
+            except:
+                data = {}
+
+        # 1. Extracción segura de Identificación (con respaldos múltiples)
+        identificacion = data.get('identificacion', {})
+        codigo_gen = (
+            identificacion.get('codigoGeneracion') or 
+            data.get('codigoGeneracion') or 
+            data.get('codigo') or 
+            'N/A'
+        )
+        num_control = (
+            identificacion.get('numeroControl') or 
+            data.get('numeroControl') or 
+            'N/A'
+        )
+        
+        # 2. Extracción segura de Resumen y Montos
+        resumen = data.get('resumen', {})
+        
+        # Búsqueda flexible de montos gravados
+        gravada = (
+            resumen.get('totalGravada') or 
+            resumen.get('subTotalVentas') or 
+            resumen.get('montoSujetoGrav') or 
+            0.0
+        )
+        
+        # Búsqueda flexible de descuentos
+        descuentos = (
+            resumen.get('totalDescu') or 
+            resumen.get('descuNoSuj') or 
+            resumen.get('descuentos') or 
+            0.0
+        )
+        
+        # Búsqueda flexible de subtotal
+        subtotal = (
+            resumen.get('subTotal') or 
+            resumen.get('subTotalVentas') or 
+            gravada or 
+            0.0
+        )
+        
+        # 3. Búsqueda flexible de IVA (incluyendo el arreglo de tributos si aplica)
+        iva = (
+            resumen.get('ivaRenta') or 
+            resumen.get('totalIva') or 
+            resumen.get('ivaPerci1') or 
+            0.0
+        )
+        
+        if float(iva) == 0.0 and 'tributos' in resumen:
+            tributos = resumen.get('tributos')
+            if isinstance(tributos, list):
+                for trib in tributos:
+                    if isinstance(trib, dict) and str(trib.get('codigo')) == '20': # Código estándar de IVA
+                        iva += float(trib.get('valTributo', 0))
+            elif isinstance(tributos, (int, float)):
+                iva = tributos
+
+        # Búsqueda flexible de Total a Pagar
+        total_pagar = (
+            resumen.get('totalPagar') or 
+            resumen.get('montoTotalOperacion') or 
+            resumen.get('total') or 
+            0.0
+        )
+        
+        # Si el total sigue en 0 pero tenemos componentes, calculárselo de respaldo
+        if float(total_pagar) == 0.0 and (float(gravada) > 0 or float(subtotal) > 0):
+            total_pagar = float(subtotal) + float(iva) - float(descuentos)
+
+        # Normalización a tipo float seguro
+        try: gravada = float(gravada)
+        except: gravada = 0.0
+        
+        try: descuentos = float(descuentos)
+        except: descuentos = 0.0
+        
+        try: subtotal = float(subtotal)
+        except: subtotal = 0.0
+        
+        try: iva = float(iva)
+        except: iva = 0.0
+        
+        try: total_pagar = float(total_pagar)
+        except: total_pagar = 0.0
+
+        rows.append({
             "Archivo": filename,
-            "Código de Generación": str(gen_code).upper(),
-            "Número de Control": str(doc_num),
-            "Venta Gravada": val_gravada,
-            "Descuentos": val_descu,
-            "SubTotal": sub_total,
-            "IVA (13%)": iva_f,
-            "Total a Pagar": total_f
+            "Código de Generación": str(codigo_gen).upper(),
+            "Número de Control": str(num_control),
+            "Venta Gravada": gravada,
+            "Descuentos": descuentos,
+            "SubTotal": subtotal,
+            "IVA (13%)": iva,
+            "Total a Pagar": total_pagar
         })
         
-    return pd.DataFrame(summary_data)
+    return pd.DataFrame(rows)
 
 # --- Inicialización de Estados de Sesión ---
 if "logged_in" not in st.session_state:
