@@ -409,7 +409,7 @@ def client_dashboard():
                     df_sales = extract_invoice_summary(envio.get('sales_json_list'))
                     df_purch = extract_invoice_summary(envio.get('purch_json_list'))
                     
-                    v_val = df_sales['Valor'].sum() if not df_sales.empty else 0.0
+                    v_val = df_sales['Total a Pagar'].sum() if not df_sales.empty and 'Total a Pagar' in df_sales.columns else 0.0
                     v_iva = df_sales['IVA'].sum() if not df_sales.empty else 0.0
                     v_tot = df_sales['Total'].sum() if not df_sales.empty else 0.0
                     
