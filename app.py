@@ -69,18 +69,25 @@ def create_zip_buffer(json_list, pdf_list):
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
 
+
 def extract_invoice_summary(file_list):
-    """Extrae los datos de DTEs de El Salvador usando estrictamente la estructura oficial (Identificación y Resumen)."""
+    """
+    Extrae de forma robusta los datos clave de los archivos JSON de DTEs de El Salvador,
+    manejando tanto documentos completos como estructuras simplificadas/resumidas.
+    """
     summary_data = []
     if not file_list:
         return pd.DataFrame()
     
     for file_info in file_list:
         path = file_info.get("path")
-        filename = file_info.get("name", "")
+        filename = file_info.get("name", "Desconocido")
+        
         gen_code = "N/A"
         doc_num = "N/A"
-        val_f = 0.0
+        val_gravada = 0.0
+        val_descu = 0.0
+        sub_total = 0.0
         iva_f = 0.0
         total_f = 0.0
         
@@ -94,28 +101,25 @@ def extract_invoice_summary(file_list):
                     if not isinstance(item, dict):
                         continue
                         
-                    # 1. Bloque de Identificación Oficial (MH El Salvador)
+                    # 1. Extracción de Identificación
                     ident = item.get("identificacion", {})
                     if isinstance(ident, dict):
                         gen_code = ident.get("codigoGeneracion") or ident.get("codigoGen") or gen_code
                         doc_num = ident.get("numeroControl") or ident.get("numControl") or doc_num
                     
-                    # Respaldo a nivel raíz si no está en identificación
                     if gen_code == "N/A":
                         gen_code = item.get("codigoGeneracion") or item.get("codigoGen") or item.get("uuid") or "N/A"
                     if doc_num == "N/A":
                         doc_num = item.get("numeroControl") or item.get("numControl") or item.get("numeroDte") or "N/A"
                         
-                    # 2. Bloque de Resumen Oficial (MH El Salvador)
+                    # 2. Extracción de Resumen Financiero
                     resumen = item.get("resumen", {})
                     if isinstance(resumen, dict):
-                        # Valor (Ventas gravadas / subtotal)
-                        val_f = float(resumen.get("totalGravada") or resumen.get("subTotal") or resumen.get("subTotalVentas") or resumen.get("montoNeto") or 0.0)
+                        val_gravada = float(resumen.get("totalGravada") or 0.0)
+                        val_descu = float(resumen.get("totalDescu") or resumen.get("descuGravada") or 0.0)
+                        sub_total = float(resumen.get("subTotal") or resumen.get("subTotalVentas") or (val_gravada - val_descu))
                         
-                        # Total a Pagar / Monto Total de Operación
-                        total_f = float(resumen.get("totalPagar") or resumen.get("montoTotalOperacion") or resumen.get("total") or 0.0)
-                        
-                        # Extracción de IVA (ya sea directo en totalIva o dentro del arreglo de tributos código "20")
+                        # Búsqueda segura del IVA (Tributo código 20)
                         iva_val = resumen.get("totalIva") or 0.0
                         if not iva_val or float(iva_val) == 0.0:
                             tributos = resumen.get("tributos", [])
@@ -125,38 +129,22 @@ def extract_invoice_summary(file_list):
                                         if str(trib.get("codigo")) == "20" or "iva" in str(trib.get("descripcion", "")).lower():
                                             iva_val = trib.get("valor") or iva_val
                         iva_f = float(iva_val or 0.0)
-
-                # 3. Respaldos mediante el nombre del archivo si algún campo quedó como N/A
-                import re
-                if gen_code == "N/A" or not gen_code:
-                    uuid_match = re.search(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', filename)
-                    if uuid_match:
-                        gen_code = uuid_match.group(0).upper()
                         
-                if doc_num == "N/A" or not doc_num:
-                    if "DTE-" in filename.upper():
-                        doc_num = filename.replace(".json", "").replace(".JSON", "")
-                    else:
-                        doc_num = filename.replace(".json", "").replace(".JSON", "") if filename else "N/A"
-                
-                # Balance cruzado financiero por seguridad si algún monto viene en cero
-                if total_f == 0.0 and val_f > 0.0:
-                    total_f = val_f + iva_f
-                elif val_f == 0.0 and total_f > 0.0:
-                    if total_f >= iva_f:
-                        val_f = total_f - iva_f
-                    else:
-                        val_f = total_f
+                        # Monto total final a pagar garantizado
+                        total_f = float(resumen.get("totalPagar") or resumen.get("montoTotalOperacion") or resumen.get("total") or (sub_total + iva_f))
 
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Error procesando {filename}: {e}")
                 
         summary_data.append({
+            "Archivo": filename,
             "Código de Generación": str(gen_code).upper(),
             "Número de Control": str(doc_num),
-            "Valor": val_f,
-            "IVA": iva_f,
-            "Total": total_f
+            "Venta Gravada": val_gravada,
+            "Descuentos": val_descu,
+            "SubTotal": sub_total,
+            "IVA (13%)": iva_f,
+            "Total a Pagar": total_f
         })
         
     return pd.DataFrame(summary_data)
