@@ -70,11 +70,28 @@ def create_zip_buffer(json_list, pdf_list):
     return zip_buffer.getvalue()
 
 def extract_invoice_summary(file_list):
-    """Extrae el Código de Generación, Número de Control (DTE-03), valor, iva y total con parsing robusto y respaldo en nombre de archivo."""
+    """Extrae con búsqueda recursiva total y respaldos los datos de DTEs, evitando N/A y $0.00."""
     summary_data = []
     if not file_list:
         return pd.DataFrame()
     
+    # Función auxiliar para buscar claves en cualquier nivel de anidación del JSON
+    def recursive_find_key(node, target_keys):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k in target_keys and v is not None and str(v).strip() != "" and str(v).upper() != "N/A":
+                    return v
+                if isinstance(v, (dict, list)):
+                    res = recursive_find_key(v, target_keys)
+                    if res is not None:
+                        return res
+        elif isinstance(node, list):
+            for item in node:
+                res = recursive_find_key(item, target_keys)
+                if res is not None:
+                    return res
+        return None
+
     for file_info in file_list:
         path = file_info.get("path")
         filename = file_info.get("name", "")
@@ -85,69 +102,72 @@ def extract_invoice_summary(file_list):
                 
                 items = content if isinstance(content, list) else [content]
                 for item in items:
-                    # Función interna para buscar claves recursivamente
-                    def buscar_clave(d, posibles_claves):
-                        if not isinstance(d, dict):
-                            return None
-                        for k in posibles_claves:
-                            if k in d and d[k] is not None and d[k] != "":
-                                return d[k]
-                        for k, v in d.items():
-                            if isinstance(v, dict):
-                                res = buscar_clave(v, posibles_claves)
-                                if res is not None:
-                                    return res
-                        return None
-
-                    # 1. Búsqueda robusta de Código de Generación (UUID) con respaldo en el nombre del archivo
-                    gen_code = buscar_clave(item, ["codigoGeneracion", "codigoGen", "uuid", "guid"])
-                    if not gen_code or gen_code == "N/A":
+                    if not isinstance(item, dict):
+                        item = {}
+                    
+                    # 1. Búsqueda robusta de Código de Generación (UUID)
+                    gen_code = recursive_find_key(item, ["codigoGeneracion", "codigoGen", "uuid", "guid", "selloRecibido"])
+                    if not gen_code or str(gen_code).upper() == "N/A":
                         uuid_match = re.search(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', filename)
                         if uuid_match:
                             gen_code = uuid_match.group(0).upper()
                         else:
                             gen_code = "N/A"
-
+                            
                     # 2. Búsqueda robusta de Número de Control
-                    doc_num = buscar_clave(item, ["numeroControl", "numControl", "numeroDte", "folio"])
-                    if not doc_num or doc_num == "N/A":
-                        if "DTE-" in filename:
-                            doc_num = filename.replace(".json", "")
+                    doc_num = recursive_find_key(item, ["numeroControl", "numControl", "numeroDte", "folio", "numDocumento"])
+                    if not doc_num or str(doc_num).upper() == "N/A":
+                        if "DTE-" in filename.upper():
+                            doc_num = filename.replace(".json", "").replace(".JSON", "")
                         else:
-                            doc_num = filename
+                            doc_num = filename.replace(".json", "").replace(".JSON", "") if filename else "N/A"
 
-                    # 3. Extracción flexible de montos
-                    val = buscar_clave(item, ["subTotal", "totalGravada", "montoTotalOperacion", "totalNoSuj", "totalExenta"]) or 0.0
-                    iva = buscar_clave(item, ["totalIva", "iva", "ivaRete1"]) or 0.0
-                    total = buscar_clave(item, ["totalPagar", "montoTotalOperacion", "totalNeto"]) or 0.0
+                    # 3. Búsqueda recursiva de Montos (Valor, IVA, Total)
+                    val = recursive_find_key(item, ["totalGravada", "subTotal", "subTotalVentas", "montoTotalOperacion", "montoNeto", "subtotal", "valor", "monto"]) or 0.0
+                    iva = recursive_find_key(item, ["totalIva", "iva", "ivaRenta", "ivaPerci1", "ivaRete1"]) or 0.0
+                    total = recursive_find_key(item, ["totalPagar", "montoTotalOperacion", "total", "montoTotal"]) or 0.0
 
-                    # Soporte para matriz de tributos si el IVA viene desglosado
-                    resumen_obj = item.get("resumen", {})
-                    if isinstance(resumen_obj, dict) and "tributos" in resumen_obj and isinstance(resumen_obj["tributos"], list) and (not iva or float(iva) == 0.0):
-                        iva_tributos = 0.0
-                        for trib in resumen_obj["tributos"]:
-                            if isinstance(trib, dict):
-                                val_trib = trib.get("valor") or trib.get("valTributo") or 0.0
-                                try:
-                                    iva_tributos += float(val_trib)
-                                except:
-                                    pass
-                        if iva_tributos > 0:
-                            iva = iva_tributos
+                    # Soporte para matriz de tributos si el IVA no vino directo
+                    if not iva or float(iva) == 0.0:
+                        def find_tributos(node):
+                            if isinstance(node, dict):
+                                for k, v in node.items():
+                                    if k == "tributos" and isinstance(v, list):
+                                        return v
+                                    res = find_tributos(v)
+                                    if res: return res
+                            elif isinstance(node, list):
+                                for sub in node:
+                                    res = find_tributos(sub)
+                                    if res: return res
+                            return None
+                        
+                        tribs = find_tributos(item)
+                        if tribs:
+                            iva_tributos = 0.0
+                            for trib in tribs:
+                                if isinstance(trib, dict):
+                                    v_trib = trib.get("valor") or trib.get("valTributo") or 0.0
+                                    try:
+                                        iva_tributos += float(v_trib)
+                                    except:
+                                        pass
+                            if iva_tributos > 0:
+                                iva = iva_tributos
 
-                    # Conversión segura a float y ecuaciones cruzadas
+                    # Conversión segura a float y balance cruzado financiero
                     try:
-                        val_f = float(val)
+                        val_f = float(val) if val is not None else 0.0
                     except:
                         val_f = 0.0
                         
                     try:
-                        iva_f = float(iva)
+                        iva_f = float(iva) if iva is not None else 0.0
                     except:
                         iva_f = 0.0
                         
                     try:
-                        total_f = float(total)
+                        total_f = float(total) if total is not None else 0.0
                     except:
                         total_f = 0.0
                         
@@ -166,7 +186,7 @@ def extract_invoice_summary(file_list):
             except Exception:
                 summary_data.append({
                     "Código de Generación": "N/A",
-                    "Número de Control": filename,
+                    "Número de Control": filename.replace(".json", "") if filename else "N/A",
                     "Valor": 0.0,
                     "IVA": 0.0,
                     "Total": 0.0
