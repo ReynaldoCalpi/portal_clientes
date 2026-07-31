@@ -72,11 +72,13 @@ def create_zip_buffer(json_list, pdf_list):
 
 import pandas as pd
 
+import pandas as pd
+import json
+
 def extract_invoice_summary(json_list):
     """
-    Extrae de forma robusta los datos clave de una lista de DTEs (JSONs de Hacienda de El Salvador).
-    Maneja múltiples variantes de estructuras y llaves para garantizar que ningún documento 
-    quede en ceros o con datos faltantes.
+    Extrae de forma robusta los datos de los DTEs manteniendo los nombres de archivo originales
+    y rescatando los montos de cualquier variante de estructura JSON.
     """
     rows = []
     if not json_list:
@@ -86,48 +88,76 @@ def extract_invoice_summary(json_list):
         ])
         
     for item in json_list:
-        # Soportar diccionarios estructurados o contenido directo del JSON
-        if isinstance(item, dict) and ('data' in item or 'json_content' in item):
-            filename = item.get('filename', item.get('archivo', 'DTE_Documento.json'))
-            data = item.get('data', item.get('json_content', item))
-        else:
-            filename = getattr(item, 'name', 'DTE_Documento.json')
-            data = item if isinstance(item, dict) else {}
-
-        # Si el contenido viene como string, parsearlo a diccionario
+        filename = "DTE_Documento.json"
+        data = {}
+        
+        # 1. Detectar si es un archivo subido en Streamlit (UploadedFile) u objeto con nombre
+        if hasattr(item, 'name'):
+            filename = item.name
+            try:
+                item.seek(0)
+                content = item.read()
+                if isinstance(content, bytes):
+                    content = content.decode('utf-8')
+                data = json.loads(content)
+            except Exception:
+                try:
+                    data = json.load(item)
+                except:
+                    data = {}
+        elif isinstance(item, dict):
+            # Si viene en un diccionario, rescatar su nombre real si existe
+            filename = item.get('filename', item.get('Archivo', item.get('name', 'DTE_Documento.json')))
+            if 'data' in item:
+                data = item['data']
+            elif 'json_content' in item:
+                data = item['json_content']
+            elif 'content' in item:
+                data = item['content']
+            else:
+                data = item # El diccionario es el JSON mismo
+        
+        # Si el contenido quedó como texto plano, parsearlo
         if isinstance(data, str):
-            import json
             try:
                 data = json.loads(data)
             except:
                 data = {}
 
-        # 1. Extracción segura de Identificación (con respaldos múltiples)
+        if not isinstance(data, dict):
+            data = {}
+
+        # 2. Extracción segura de Identificación
         identificacion = data.get('identificacion', {})
+        if not isinstance(identificacion, dict):
+            identificacion = {}
+            
         codigo_gen = (
             identificacion.get('codigoGeneracion') or 
             data.get('codigoGeneracion') or 
             data.get('codigo') or 
             'N/A'
         )
+        
         num_control = (
             identificacion.get('numeroControl') or 
             data.get('numeroControl') or 
             'N/A'
         )
         
-        # 2. Extracción segura de Resumen y Montos
+        # 3. Extracción segura de Resumen y Montos
         resumen = data.get('resumen', {})
-        
-        # Búsqueda flexible de montos gravados
+        if not isinstance(resumen, dict):
+            resumen = {}
+            
         gravada = (
             resumen.get('totalGravada') or 
             resumen.get('subTotalVentas') or 
             resumen.get('montoSujetoGrav') or 
+            data.get('totalGravada') or
             0.0
         )
         
-        # Búsqueda flexible de descuentos
         descuentos = (
             resumen.get('totalDescu') or 
             resumen.get('descuNoSuj') or 
@@ -135,7 +165,6 @@ def extract_invoice_summary(json_list):
             0.0
         )
         
-        # Búsqueda flexible de subtotal
         subtotal = (
             resumen.get('subTotal') or 
             resumen.get('subTotalVentas') or 
@@ -143,24 +172,29 @@ def extract_invoice_summary(json_list):
             0.0
         )
         
-        # 3. Búsqueda flexible de IVA (incluyendo el arreglo de tributos si aplica)
-        iva = (
+        # 4. Extracción de IVA (incluyendo lectura de tributos si viene en lista)
+        iva_raw = (
             resumen.get('ivaRenta') or 
             resumen.get('totalIva') or 
             resumen.get('ivaPerci1') or 
+            resumen.get('tributos') or 
             0.0
         )
         
-        if float(iva) == 0.0 and 'tributos' in resumen:
-            tributos = resumen.get('tributos')
-            if isinstance(tributos, list):
-                for trib in tributos:
-                    if isinstance(trib, dict) and str(trib.get('codigo')) == '20': # Código estándar de IVA
-                        iva += float(trib.get('valTributo', 0))
-            elif isinstance(tributos, (int, float)):
-                iva = tributos
+        iva_val = 0.0
+        if isinstance(iva_raw, list):
+            for trib in iva_raw:
+                if isinstance(trib, dict):
+                    codigo_trib = str(trib.get('codigo', ''))
+                    # Código 20 es el estándar de IVA en El Salvador
+                    if codigo_trib == '20' or 'iva' in str(trib.get('descripcion', '')).lower():
+                        iva_val += float(trib.get('valTributo', trib.get('valor', 0)))
+        else:
+            try:
+                iva_val = float(iva_raw)
+            except:
+                iva_val = 0.0
 
-        # Búsqueda flexible de Total a Pagar
         total_pagar = (
             resumen.get('totalPagar') or 
             resumen.get('montoTotalOperacion') or 
@@ -168,35 +202,23 @@ def extract_invoice_summary(json_list):
             0.0
         )
         
-        # Si el total sigue en 0 pero tenemos componentes, calculárselo de respaldo
+        # Respaldo matemático si el total viene en 0 pero hay subtotal e IVA
         if float(total_pagar) == 0.0 and (float(gravada) > 0 or float(subtotal) > 0):
-            total_pagar = float(subtotal) + float(iva) - float(descuentos)
+            total_pagar = float(subtotal) + float(iva_val) - float(descuentos)
 
-        # Normalización a tipo float seguro
-        try: gravada = float(gravada)
-        except: gravada = 0.0
-        
-        try: descuentos = float(descuentos)
-        except: descuentos = 0.0
-        
-        try: subtotal = float(subtotal)
-        except: subtotal = 0.0
-        
-        try: iva = float(iva)
-        except: iva = 0.0
-        
-        try: total_pagar = float(total_pagar)
-        except: total_pagar = 0.0
+        def safe_float(val):
+            try: return float(val)
+            except: return 0.0
 
         rows.append({
             "Archivo": filename,
             "Código de Generación": str(codigo_gen).upper(),
             "Número de Control": str(num_control),
-            "Venta Gravada": gravada,
-            "Descuentos": descuentos,
-            "SubTotal": subtotal,
-            "IVA (13%)": iva,
-            "Total a Pagar": total_pagar
+            "Venta Gravada": safe_float(gravada),
+            "Descuentos": safe_float(descuentos),
+            "SubTotal": safe_float(subtotal),
+            "IVA (13%)": safe_float(iva_val),
+            "Total a Pagar": safe_float(total_pagar)
         })
         
     return pd.DataFrame(rows)
