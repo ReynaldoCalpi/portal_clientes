@@ -70,31 +70,20 @@ def create_zip_buffer(json_list, pdf_list):
     return zip_buffer.getvalue()
 
 def extract_invoice_summary(file_list):
-    """Extrae con búsqueda recursiva total y respaldos los datos de DTEs, evitando N/A y $0.00."""
+    """Extrae los datos de DTEs de El Salvador usando estrictamente la estructura oficial (Identificación y Resumen)."""
     summary_data = []
     if not file_list:
         return pd.DataFrame()
     
-    # Función auxiliar para buscar claves en cualquier nivel de anidación del JSON
-    def recursive_find_key(node, target_keys):
-        if isinstance(node, dict):
-            for k, v in node.items():
-                if k in target_keys and v is not None and str(v).strip() != "" and str(v).upper() != "N/A":
-                    return v
-                if isinstance(v, (dict, list)):
-                    res = recursive_find_key(v, target_keys)
-                    if res is not None:
-                        return res
-        elif isinstance(node, list):
-            for item in node:
-                res = recursive_find_key(item, target_keys)
-                if res is not None:
-                    return res
-        return None
-
     for file_info in file_list:
         path = file_info.get("path")
         filename = file_info.get("name", "")
+        gen_code = "N/A"
+        doc_num = "N/A"
+        val_f = 0.0
+        iva_f = 0.0
+        total_f = 0.0
+        
         if path and os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8-sig") as f:
@@ -103,94 +92,73 @@ def extract_invoice_summary(file_list):
                 items = content if isinstance(content, list) else [content]
                 for item in items:
                     if not isinstance(item, dict):
-                        item = {}
+                        continue
+                        
+                    # 1. Bloque de Identificación Oficial (MH El Salvador)
+                    ident = item.get("identificacion", {})
+                    if isinstance(ident, dict):
+                        gen_code = ident.get("codigoGeneracion") or ident.get("codigoGen") or gen_code
+                        doc_num = ident.get("numeroControl") or ident.get("numControl") or doc_num
                     
-                    # 1. Búsqueda robusta de Código de Generación (UUID)
-                    gen_code = recursive_find_key(item, ["codigoGeneracion", "codigoGen", "uuid", "guid", "selloRecibido"])
-                    if not gen_code or str(gen_code).upper() == "N/A":
-                        uuid_match = re.search(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', filename)
-                        if uuid_match:
-                            gen_code = uuid_match.group(0).upper()
-                        else:
-                            gen_code = "N/A"
-                            
-                    # 2. Búsqueda robusta de Número de Control
-                    doc_num = recursive_find_key(item, ["numeroControl", "numControl", "numeroDte", "folio", "numDocumento"])
-                    if not doc_num or str(doc_num).upper() == "N/A":
-                        if "DTE-" in filename.upper():
-                            doc_num = filename.replace(".json", "").replace(".JSON", "")
-                        else:
-                            doc_num = filename.replace(".json", "").replace(".JSON", "") if filename else "N/A"
+                    # Respaldo a nivel raíz si no está en identificación
+                    if gen_code == "N/A":
+                        gen_code = item.get("codigoGeneracion") or item.get("codigoGen") or item.get("uuid") or "N/A"
+                    if doc_num == "N/A":
+                        doc_num = item.get("numeroControl") or item.get("numControl") or item.get("numeroDte") or "N/A"
+                        
+                    # 2. Bloque de Resumen Oficial (MH El Salvador)
+                    resumen = item.get("resumen", {})
+                    if isinstance(resumen, dict):
+                        # Valor (Ventas gravadas / subtotal)
+                        val_f = float(resumen.get("totalGravada") or resumen.get("subTotal") or resumen.get("subTotalVentas") or resumen.get("montoNeto") or 0.0)
+                        
+                        # Total a Pagar / Monto Total de Operación
+                        total_f = float(resumen.get("totalPagar") or resumen.get("montoTotalOperacion") or resumen.get("total") or 0.0)
+                        
+                        # Extracción de IVA (ya sea directo en totalIva o dentro del arreglo de tributos código "20")
+                        iva_val = resumen.get("totalIva") or 0.0
+                        if not iva_val or float(iva_val) == 0.0:
+                            tributos = resumen.get("tributos", [])
+                            if isinstance(tributos, list):
+                                for trib in tributos:
+                                    if isinstance(trib, dict):
+                                        if str(trib.get("codigo")) == "20" or "iva" in str(trib.get("descripcion", "")).lower():
+                                            iva_val = trib.get("valor") or iva_val
+                        iva_f = float(iva_val or 0.0)
 
-                    # 3. Búsqueda recursiva de Montos (Valor, IVA, Total)
-                    val = recursive_find_key(item, ["totalGravada", "subTotal", "subTotalVentas", "montoTotalOperacion", "montoNeto", "subtotal", "valor", "monto"]) or 0.0
-                    iva = recursive_find_key(item, ["totalIva", "iva", "ivaRenta", "ivaPerci1", "ivaRete1"]) or 0.0
-                    total = recursive_find_key(item, ["totalPagar", "montoTotalOperacion", "total", "montoTotal"]) or 0.0
-
-                    # Soporte para matriz de tributos si el IVA no vino directo
-                    if not iva or float(iva) == 0.0:
-                        def find_tributos(node):
-                            if isinstance(node, dict):
-                                for k, v in node.items():
-                                    if k == "tributos" and isinstance(v, list):
-                                        return v
-                                    res = find_tributos(v)
-                                    if res: return res
-                            elif isinstance(node, list):
-                                for sub in node:
-                                    res = find_tributos(sub)
-                                    if res: return res
-                            return None
+                # 3. Respaldos mediante el nombre del archivo si algún campo quedó como N/A
+                import re
+                if gen_code == "N/A" or not gen_code:
+                    uuid_match = re.search(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', filename)
+                    if uuid_match:
+                        gen_code = uuid_match.group(0).upper()
                         
-                        tribs = find_tributos(item)
-                        if tribs:
-                            iva_tributos = 0.0
-                            for trib in tribs:
-                                if isinstance(trib, dict):
-                                    v_trib = trib.get("valor") or trib.get("valTributo") or 0.0
-                                    try:
-                                        iva_tributos += float(v_trib)
-                                    except:
-                                        pass
-                            if iva_tributos > 0:
-                                iva = iva_tributos
-
-                    # Conversión segura a float y balance cruzado financiero
-                    try:
-                        val_f = float(val) if val is not None else 0.0
-                    except:
-                        val_f = 0.0
-                        
-                    try:
-                        iva_f = float(iva) if iva is not None else 0.0
-                    except:
-                        iva_f = 0.0
-                        
-                    try:
-                        total_f = float(total) if total is not None else 0.0
-                    except:
-                        total_f = 0.0
-                        
-                    if total_f == 0.0 and val_f > 0.0:
-                        total_f = val_f + iva_f
-                    elif val_f == 0.0 and total_f > 0.0 and iva_f > 0.0:
+                if doc_num == "N/A" or not doc_num:
+                    if "DTE-" in filename.upper():
+                        doc_num = filename.replace(".json", "").replace(".JSON", "")
+                    else:
+                        doc_num = filename.replace(".json", "").replace(".JSON", "") if filename else "N/A"
+                
+                # Balance cruzado financiero por seguridad si algún monto viene en cero
+                if total_f == 0.0 and val_f > 0.0:
+                    total_f = val_f + iva_f
+                elif val_f == 0.0 and total_f > 0.0:
+                    if total_f >= iva_f:
                         val_f = total_f - iva_f
+                    else:
+                        val_f = total_f
 
-                    summary_data.append({
-                        "Código de Generación": str(gen_code).upper(),
-                        "Número de Control": str(doc_num),
-                        "Valor": val_f,
-                        "IVA": iva_f,
-                        "Total": total_f
-                    })
             except Exception:
-                summary_data.append({
-                    "Código de Generación": "N/A",
-                    "Número de Control": filename.replace(".json", "") if filename else "N/A",
-                    "Valor": 0.0,
-                    "IVA": 0.0,
-                    "Total": 0.0
-                })
+                pass
+                
+        summary_data.append({
+            "Código de Generación": str(gen_code).upper(),
+            "Número de Control": str(doc_num),
+            "Valor": val_f,
+            "IVA": iva_f,
+            "Total": total_f
+        })
+        
     return pd.DataFrame(summary_data)
 
 # --- Inicialización de Estados de Sesión ---
