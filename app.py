@@ -70,13 +70,14 @@ def create_zip_buffer(json_list, pdf_list):
     return zip_buffer.getvalue()
 
 def extract_invoice_summary(file_list):
-    """Extrae el Código de Generación, Número de Control (DTE-03), valor, iva y total con validación robusta y ecuaciones cruzadas."""
+    """Extrae el Código de Generación, Número de Control (DTE-03), valor, iva y total con parsing robusto y respaldo en nombre de archivo."""
     summary_data = []
     if not file_list:
         return pd.DataFrame()
     
     for file_info in file_list:
         path = file_info.get("path")
+        filename = file_info.get("name", "")
         if path and os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8-sig") as f:
@@ -84,65 +85,47 @@ def extract_invoice_summary(file_list):
                 
                 items = content if isinstance(content, list) else [content]
                 for item in items:
-                    # Búsqueda estructurada del número de control comenzando con DTE-03
-                    doc_num = None
-                    nc_root = item.get("numeroControl")
-                    if nc_root and str(nc_root).startswith("DTE-03"):
-                        doc_num = nc_root
-                        
-                    ident = item.get("identificacion", {})
-                    if not doc_num and isinstance(ident, dict):
-                        nc_ident = ident.get("numeroControl")
-                        if nc_ident and str(nc_ident).startswith("DTE-03"):
-                            doc_num = nc_ident
-                                
-                    if not doc_num:
-                        doc_num = (
-                            nc_root or 
-                            (ident.get("numeroControl") if isinstance(ident, dict) else None) or
-                            item.get("codigoGeneracion") or 
-                            item.get("numDocumento") or 
-                            file_info["name"]
-                        )
-                    
-                    # Extracción de Código de Generación (UUID) para trazabilidad total
-                    gen_code = None
-                    if isinstance(ident, dict):
-                        gen_code = ident.get("codigoGeneracion")
-                    if not gen_code:
-                        gen_code = item.get("codigoGeneracion") or item.get("selloRecibido") or "N/A"
-                    
-                    resumen = item.get("resumen", {})
-                    if not isinstance(resumen, dict):
-                        resumen = {}
-                    
-                    # Extracción de Valor / Gravada / Subtotal
-                    val = (
-                        resumen.get("totalGravada") or 
-                        resumen.get("subTotal") or 
-                        resumen.get("subTotalVentas") or 
-                        resumen.get("montoTotalOperacion") or 
-                        item.get("totalGravada") or
-                        item.get("subtotal") or 
-                        item.get("valor") or 
-                        0.0
-                    )
-                    
-                    # Extracción de IVA (incluyendo campos directos o búsqueda en matriz de tributos)
-                    iva = (
-                        resumen.get("totalIva") or 
-                        resumen.get("iva") or 
-                        resumen.get("ivaRenta") or 
-                        resumen.get("ivaPerci1") or 
-                        resumen.get("ivaRete1") or 
-                        item.get("totalIva") or 
-                        item.get("iva") or 
-                        0.0
-                    )
-                    
-                    if not iva and "tributos" in resumen and isinstance(resumen["tributos"], list):
+                    # Función interna para buscar claves recursivamente
+                    def buscar_clave(d, posibles_claves):
+                        if not isinstance(d, dict):
+                            return None
+                        for k in posibles_claves:
+                            if k in d and d[k] is not None and d[k] != "":
+                                return d[k]
+                        for k, v in d.items():
+                            if isinstance(v, dict):
+                                res = buscar_clave(v, posibles_claves)
+                                if res is not None:
+                                    return res
+                        return None
+
+                    # 1. Búsqueda robusta de Código de Generación (UUID) con respaldo en el nombre del archivo
+                    gen_code = buscar_clave(item, ["codigoGeneracion", "codigoGen", "uuid", "guid"])
+                    if not gen_code or gen_code == "N/A":
+                        uuid_match = re.search(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', filename)
+                        if uuid_match:
+                            gen_code = uuid_match.group(0).upper()
+                        else:
+                            gen_code = "N/A"
+
+                    # 2. Búsqueda robusta de Número de Control
+                    doc_num = buscar_clave(item, ["numeroControl", "numControl", "numeroDte", "folio"])
+                    if not doc_num or doc_num == "N/A":
+                        if "DTE-" in filename:
+                            doc_num = filename.replace(".json", "")
+                        else:
+                            doc_num = filename
+
+                    # 3. Extracción flexible de montos
+                    val = buscar_clave(item, ["subTotal", "totalGravada", "montoTotalOperacion", "totalNoSuj", "totalExenta"]) or 0.0
+                    iva = buscar_clave(item, ["totalIva", "iva", "ivaRete1"]) or 0.0
+                    total = buscar_clave(item, ["totalPagar", "montoTotalOperacion", "totalNeto"]) or 0.0
+
+                    # Soporte para matriz de tributos si el IVA viene desglosado
+                    resumen_obj = item.get("resumen", {})
+                    if isinstance(resumen_obj, dict) and "tributos" in resumen_obj and isinstance(resumen_obj["tributos"], list) and (not iva or float(iva) == 0.0):
                         iva_tributos = 0.0
-                        for trib in resumen["tributos"]:
+                        for trib in resumen_obj["tributos"]:
                             if isinstance(trib, dict):
                                 val_trib = trib.get("valor") or trib.get("valTributo") or 0.0
                                 try:
@@ -152,31 +135,29 @@ def extract_invoice_summary(file_list):
                         if iva_tributos > 0:
                             iva = iva_tributos
 
-                    # Extracción de Total a Pagar
-                    total = (
-                        resumen.get("totalPagar") or 
-                        resumen.get("montoTotalOperacion") or 
-                        resumen.get("total") or 
-                        item.get("totalPagar") or 
-                        item.get("total") or 
-                        0.0
-                    )
-                    
-                    # Ecuaciones de validación y balance financiero cruzado
+                    # Conversión segura a float y ecuaciones cruzadas
                     try:
-                        val_f = float(val) if val is not None else 0.0
-                        iva_f = float(iva) if iva is not None else 0.0
-                        total_f = float(total) if total is not None else 0.0
-                        
-                        if total_f == 0.0 and val_f > 0.0:
-                            total_f = val_f + iva_f
-                        elif val_f == 0.0 and total_f > 0.0 and iva_f > 0.0:
-                            val_f = total_f - iva_f
+                        val_f = float(val)
                     except:
-                        val_f, iva_f, total_f = 0.0, 0.0, 0.0
+                        val_f = 0.0
                         
+                    try:
+                        iva_f = float(iva)
+                    except:
+                        iva_f = 0.0
+                        
+                    try:
+                        total_f = float(total)
+                    except:
+                        total_f = 0.0
+                        
+                    if total_f == 0.0 and val_f > 0.0:
+                        total_f = val_f + iva_f
+                    elif val_f == 0.0 and total_f > 0.0 and iva_f > 0.0:
+                        val_f = total_f - iva_f
+
                     summary_data.append({
-                        "Código de Generación": str(gen_code),
+                        "Código de Generación": str(gen_code).upper(),
                         "Número de Control": str(doc_num),
                         "Valor": val_f,
                         "IVA": iva_f,
@@ -185,7 +166,7 @@ def extract_invoice_summary(file_list):
             except Exception:
                 summary_data.append({
                     "Código de Generación": "N/A",
-                    "Número de Control": file_info["name"],
+                    "Número de Control": filename,
                     "Valor": 0.0,
                     "IVA": 0.0,
                     "Total": 0.0
