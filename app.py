@@ -407,48 +407,71 @@ def client_dashboard():
                         st.markdown("---")
                     
                     df_sales = extract_invoice_summary(envio.get('sales_json_list'))
-                    df_purch = extract_invoice_summary(envio.get('purch_json_list'))
+                df_purch = extract_invoice_summary(envio.get('purch_json_list'))
+                
+                v_val = df_sales['SubTotal'].sum() if not df_sales.empty and 'SubTotal' in df_sales.columns else 0.0
+                v_iva = df_sales['IVA (13%)'].sum() if not df_sales.empty and 'IVA (13%)' in df_sales.columns else 0.0
+                v_tot = df_sales['Total a Pagar'].sum() if not df_sales.empty and 'Total a Pagar' in df_sales.columns else 0.0
+                
+                p_val = df_purch['SubTotal'].sum() if not df_purch.empty and 'SubTotal' in df_purch.columns else 0.0
+                p_iva = df_purch['IVA (13%)'].sum() if not df_purch.empty and 'IVA (13%)' in df_purch.columns else 0.0
+                p_tot = df_purch['Total a Pagar'].sum() if not df_purch.empty and 'Total a Pagar' in df_purch.columns else 0.0
+                
+                # --- Resumen Ejecutivo de IVA para el Cliente ---
+                st.markdown("##### 💼 Resumen Ejecutivo de IVA")
+                col_re1, col_re2, col_re3 = st.columns(3)
+                col_re1.metric("Débito Fiscal (IVA Ventas)", f"${v_iva:,.2f}")
+                col_re2.metric("Crédito Fiscal (IVA Compras)", f"${p_iva:,.2f}")
+                
+                iva_neto = v_iva - p_iva
+                if iva_neto >= 0:
+                    col_re3.metric("IVA a Pagar Estimado", f"${iva_neto:,.2f}", delta_color="inverse")
+                else:
+                    col_re3.metric("Remanente de IVA a Favor", f"${abs(iva_neto):,.2f}", delta_color="normal")
+                
+                # --- Sección de Ventas con Trazabilidad ---
+                st.markdown("---")
+                st.markdown("##### 📈 Detalle de Ventas (Trazabilidad DTE)")
+                if not df_sales.empty:
+                    col_m1, col_m2, col_m3 = st.columns(3)
+                    col_m1.metric("Subtotal Ventas", f"${v_val:,.2f}")
+                    col_m2.metric("IVA Ventas", f"${v_iva:,.2f}")
+                    col_m3.metric("Total Ventas", f"${v_tot:,.2f}")
                     
-                    v_val = df_sales['Total a Pagar'].sum() if not df_sales.empty and 'Total a Pagar' in df_sales.columns else 0.0
-                    v_iva = df_sales['IVA'].sum() if not df_sales.empty else 0.0
-                    v_tot = df_sales['Total'].sum() if not df_sales.empty else 0.0
+                    st.dataframe(
+                        df_sales.style.format({
+                            "Venta Gravada": "${:,.2f}",
+                            "Descuentos": "${:,.2f}",
+                            "SubTotal": "${:,.2f}",
+                            "IVA (13%)": "${:,.2f}",
+                            "Total a Pagar": "${:,.2f}"
+                        }),
+                        use_container_width=True
+                    )
+                else:
+                    st.text("Sin registros de ventas detallados para este periodo.")
                     
-                    p_val = df_purch['Valor'].sum() if not df_purch.empty else 0.0
-                    p_iva = df_purch['IVA'].sum() if not df_purch.empty else 0.0
-                    p_tot = df_purch['Total'].sum() if not df_purch.empty else 0.0
+                # --- Sección de Compras con Trazabilidad ---
+                st.markdown("---")
+                st.markdown("##### 📉 Detalle de Compras y Gastos (Trazabilidad DTE)")
+                if not df_purch.empty:
+                    col_pm1, col_pm2, col_pm3 = st.columns(3)
+                    col_pm1.metric("Subtotal Compras", f"${p_val:,.2f}")
+                    col_pm2.metric("IVA Compras", f"${p_iva:,.2f}")
+                    col_pm3.metric("Total Compras", f"${p_tot:,.2f}")
                     
-                    # --- Resumen Ejecutivo de IVA para el Cliente ---
-                    st.markdown("##### 💼 Resumen Ejecutivo de IVA")
-                    col_re1, col_re2, col_re3 = st.columns(3)
-                    col_re1.metric("Débito Fiscal (IVA Ventas)", f"${v_iva:,.2f}")
-                    col_re2.metric("Crédito Fiscal (IVA Compras)", f"${p_iva:,.2f}")
-                    
-                    iva_neto = v_iva - p_iva
-                    if iva_neto >= 0:
-                        col_re3.metric("IVA a Pagar Estimado", f"${iva_neto:,.2f}", delta_color="inverse")
-                    else:
-                        col_re3.metric("Remanente de IVA a Favor", f"${abs(iva_neto):,.2f}", delta_color="normal")
-                    
-                    # --- Sección de Ventas con Trazabilidad (Código de Generación + No. Control) ---
-                    st.markdown("---")
-                    st.markdown("##### 📈 Detalle de Ventas (Trazabilidad DTE)")
-                    if not df_sales.empty:
-                        col_m1, col_m2, col_m3 = st.columns(3)
-                        col_m1.metric("Subtotal Ventas", f"${v_val:,.2f}")
-                        col_m2.metric("IVA Ventas", f"${v_iva:,.2f}")
-                        col_m3.metric("Total Ventas", f"${v_tot:,.2f}")
-                        
-                        st.dataframe(
-                            df_sales.style.format({
-                                "Valor": "${:,.2f}",
-                                "IVA": "${:,.2f}",
-                                "Total": "${:,.2f}"
-                            }),
-                            use_container_width=True
-                        )
-                    else:
-                        st.text("Sin registros de ventas detallados para este periodo.")
-                        
+                    st.dataframe(
+                        df_purch.style.format({
+                            "Venta Gravada": "${:,.2f}",
+                            "Descuentos": "${:,.2f}",
+                            "SubTotal": "${:,.2f}",
+                            "IVA (13%)": "${:,.2f}",
+                            "Total a Pagar": "${:,.2f}"
+                        }),
+                        use_container_width=True
+                    )
+                else:
+                    st.text("Sin registros de compras detallados para este periodo.")                        
                     # --- Sección de Compras con Trazabilidad ---
                     st.markdown("---")
                     st.markdown("##### 📉 Detalle de Compras y Gastos (Trazabilidad DTE)")
