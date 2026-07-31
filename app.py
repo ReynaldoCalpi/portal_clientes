@@ -69,152 +69,128 @@ def create_zip_buffer(json_list, pdf_list):
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
 
-
-import pandas as pd
-
-import pandas as pd
-import json
-
-import pandas as pd
-import json
-
-import pandas as pd
-import json
-
-def extract_invoice_summary(json_list):
-    """
-    Extrae de forma robusta y segura los datos de los DTEs, soportando archivos subidos,
-    diccionarios estructurados y strings JSON planos.
-    """
-    rows = []
-    if not json_list:
-        return pd.DataFrame(columns=[
-            "Archivo", "Código de Generación", "Número de Control", 
-            "Venta Gravada", "Descuentos", "SubTotal", "IVA (13%)", "Total a Pagar"
-        ])
-        
-    for item in json_list:
-        filename = "DTE_Documento.json"
-        data = {}
-        
-        # 1. Identificar y normalizar el origen del ítem (Archivo, Diccionario o String)
-        if hasattr(item, 'name'):
-            filename = item.name
+def extract_invoice_summary(file_list):
+    """Extrae el Código de Generación, Número de Control (DTE-03), valor, iva y total con validación robusta y ecuaciones cruzadas."""
+    summary_data = []
+    if not file_list:
+        return pd.DataFrame()
+    
+    for file_info in file_list:
+        path = file_info.get("path")
+        if path and os.path.exists(path):
             try:
-                item.seek(0)
-                content = item.read()
-                if isinstance(content, bytes):
-                    content = content.decode('utf-8', errors='ignore')
-                data = json.loads(content)
-            except:
-                data = {}
-        elif isinstance(item, dict):
-            filename = item.get('filename', item.get('Archivo', item.get('name', 'DTE_Documento.json')))
-            # Buscar contenedores comunes si el JSON está anidado
-            for k in ['data', 'json_content', 'content', 'json', 'body', 'payload']:
-                if k in item:
-                    val = item[k]
-                    if isinstance(val, dict):
-                        data = val
-                        break
-                    elif isinstance(val, str):
-                        try:
-                            data = json.loads(val)
-                            break
-                        except:
-                            pass
-            if not data:
-                data = item  # El diccionario es el DTE en sí
-        elif isinstance(item, str):
-            try:
-                data = json.loads(item)
-            except:
-                data = {}
+                with open(path, "r", encoding="utf-8-sig") as f:
+                    content = json.load(f)
+                
+                items = content if isinstance(content, list) else [content]
+                for item in items:
+                    # Búsqueda estructurada del número de control comenzando con DTE-03
+                    doc_num = None
+                    nc_root = item.get("numeroControl")
+                    if nc_root and str(nc_root).startswith("DTE-03"):
+                        doc_num = nc_root
+                        
+                    ident = item.get("identificacion", {})
+                    if not doc_num and isinstance(ident, dict):
+                        nc_ident = ident.get("numeroControl")
+                        if nc_ident and str(nc_ident).startswith("DTE-03"):
+                            doc_num = nc_ident
+                                
+                    if not doc_num:
+                        doc_num = (
+                            nc_root or 
+                            (ident.get("numeroControl") if isinstance(ident, dict) else None) or
+                            item.get("codigoGeneracion") or 
+                            item.get("numDocumento") or 
+                            file_info["name"]
+                        )
+                    
+                    # Extracción de Código de Generación (UUID) para trazabilidad total
+                    gen_code = None
+                    if isinstance(ident, dict):
+                        gen_code = ident.get("codigoGeneracion")
+                    if not gen_code:
+                        gen_code = item.get("codigoGeneracion") or item.get("selloRecibido") or "N/A"
+                    
+                    resumen = item.get("resumen", {})
+                    if not isinstance(resumen, dict):
+                        resumen = {}
+                    
+                    # Extracción de Valor / Gravada / Subtotal
+                    val = (
+                        resumen.get("totalGravada") or 
+                        resumen.get("subTotal") or 
+                        resumen.get("subTotalVentas") or 
+                        resumen.get("montoTotalOperacion") or 
+                        item.get("totalGravada") or
+                        item.get("subtotal") or 
+                        item.get("valor") or 
+                        0.0
+                    )
+                    
+                    # Extracción de IVA (incluyendo campos directos o búsqueda en matriz de tributos)
+                    iva = (
+                        resumen.get("totalIva") or 
+                        resumen.get("iva") or 
+                        resumen.get("ivaRenta") or 
+                        resumen.get("ivaPerci1") or 
+                        resumen.get("ivaRete1") or 
+                        item.get("totalIva") or 
+                        item.get("iva") or 
+                        0.0
+                    )
+                    
+                    if not iva and "tributos" in resumen and isinstance(resumen["tributos"], list):
+                        iva_tributos = 0.0
+                        for trib in resumen["tributos"]:
+                            if isinstance(trib, dict):
+                                val_trib = trib.get("valor") or trib.get("valTributo") or 0.0
+                                try:
+                                    iva_tributos += float(val_trib)
+                                except:
+                                    pass
+                        if iva_tributos > 0:
+                            iva = iva_tributos
 
-        if not isinstance(data, dict):
-            data = {}
-
-        # 2. Extracción directa de nodos oficiales del DTE (Hacienda El Salvador)
-        identificacion = data.get('identificacion', {})
-        if not isinstance(identificacion, dict):
-            identificacion = {}
-            
-        codigo_gen = identificacion.get('codigoGeneracion') or data.get('codigoGeneracion') or data.get('codigo') or 'N/A'
-        num_control = identificacion.get('numeroControl') or data.get('numeroControl') or 'N/A'
-
-        resumen = data.get('resumen', {})
-        if not isinstance(resumen, dict):
-            resumen = {}
-
-        gravada = (
-            resumen.get('totalGravada') or 
-            resumen.get('subTotalVentas') or 
-            resumen.get('montoSujetoGrav') or 
-            data.get('totalGravada') or 
-            0.0
-        )
-
-        descuentos = (
-            resumen.get('totalDescu') or 
-            resumen.get('descuNoSuj') or 
-            resumen.get('descuentos') or 
-            0.0
-        )
-
-        subtotal = (
-            resumen.get('subTotal') or 
-            resumen.get('subTotalVentas') or 
-            gravada or 
-            0.0
-        )
-
-        iva = (
-            resumen.get('totalIva') or 
-            resumen.get('ivaRenta') or 
-            resumen.get('ivaPerci1') or 
-            0.0
-        )
-
-        # Si el IVA directo está en 0, buscar en el listado de tributos
-        if float(iva) == 0.0 and 'tributos' in resumen:
-            tributos = resumen.get('tributos')
-            if isinstance(tributos, list):
-                for trib in tributos:
-                    if isinstance(trib, dict):
-                        codigo_trib = str(trib.get('codigo', ''))
-                        desc_trib = str(trib.get('descripcion', '')).lower()
-                        if codigo_trib == '20' or 'iva' in desc_trib:
-                            iva += float(trib.get('valTributo', trib.get('valor', 0)))
-
-        total_pagar = (
-            resumen.get('totalPagar') or 
-            resumen.get('montoTotalOperacion') or 
-            resumen.get('total') or 
-            0.0
-        )
-
-        # Respaldo matemático si el total viene vacío pero existen los componentes
-        if float(total_pagar) == 0.0 and (float(gravada) > 0 or float(subtotal) > 0):
-            total_pagar = float(subtotal) + float(iva) - float(descuentos)
-
-        def safe_float(val):
-            try:
-                return float(val)
-            except:
-                return 0.0
-
-        rows.append({
-            "Archivo": filename,
-            "Código de Generación": str(codigo_gen).upper(),
-            "Número de Control": str(num_control),
-            "Venta Gravada": safe_float(gravada),
-            "Descuentos": safe_float(descuentos),
-            "SubTotal": safe_float(subtotal),
-            "IVA (13%)": safe_float(iva),
-            "Total a Pagar": safe_float(total_pagar)
-        })
-        
-    return pd.DataFrame(rows)
+                    # Extracción de Total a Pagar
+                    total = (
+                        resumen.get("totalPagar") or 
+                        resumen.get("montoTotalOperacion") or 
+                        resumen.get("total") or 
+                        item.get("totalPagar") or 
+                        item.get("total") or 
+                        0.0
+                    )
+                    
+                    # Ecuaciones de validación y balance financiero cruzado
+                    try:
+                        val_f = float(val) if val is not None else 0.0
+                        iva_f = float(iva) if iva is not None else 0.0
+                        total_f = float(total) if total is not None else 0.0
+                        
+                        if total_f == 0.0 and val_f > 0.0:
+                            total_f = val_f + iva_f
+                        elif val_f == 0.0 and total_f > 0.0 and iva_f > 0.0:
+                            val_f = total_f - iva_f
+                    except:
+                        val_f, iva_f, total_f = 0.0, 0.0, 0.0
+                        
+                    summary_data.append({
+                        "Código de Generación": str(gen_code),
+                        "Número de Control": str(doc_num),
+                        "Valor": val_f,
+                        "IVA": iva_f,
+                        "Total": total_f
+                    })
+            except Exception:
+                summary_data.append({
+                    "Código de Generación": "N/A",
+                    "Número de Control": file_info["name"],
+                    "Valor": 0.0,
+                    "IVA": 0.0,
+                    "Total": 0.0
+                })
+    return pd.DataFrame(summary_data)
 
 # --- Inicialización de Estados de Sesión ---
 if "logged_in" not in st.session_state:
@@ -474,71 +450,48 @@ def client_dashboard():
                         st.markdown("---")
                     
                     df_sales = extract_invoice_summary(envio.get('sales_json_list'))
-                df_purch = extract_invoice_summary(envio.get('purch_json_list'))
-                
-                v_val = df_sales['SubTotal'].sum() if not df_sales.empty and 'SubTotal' in df_sales.columns else 0.0
-                v_iva = df_sales['IVA (13%)'].sum() if not df_sales.empty and 'IVA (13%)' in df_sales.columns else 0.0
-                v_tot = df_sales['Total a Pagar'].sum() if not df_sales.empty and 'Total a Pagar' in df_sales.columns else 0.0
-                
-                p_val = df_purch['SubTotal'].sum() if not df_purch.empty and 'SubTotal' in df_purch.columns else 0.0
-                p_iva = df_purch['IVA (13%)'].sum() if not df_purch.empty and 'IVA (13%)' in df_purch.columns else 0.0
-                p_tot = df_purch['Total a Pagar'].sum() if not df_purch.empty and 'Total a Pagar' in df_purch.columns else 0.0
-                
-                # --- Resumen Ejecutivo de IVA para el Cliente ---
-                st.markdown("##### 💼 Resumen Ejecutivo de IVA")
-                col_re1, col_re2, col_re3 = st.columns(3)
-                col_re1.metric("Débito Fiscal (IVA Ventas)", f"${v_iva:,.2f}")
-                col_re2.metric("Crédito Fiscal (IVA Compras)", f"${p_iva:,.2f}")
-                
-                iva_neto = v_iva - p_iva
-                if iva_neto >= 0:
-                    col_re3.metric("IVA a Pagar Estimado", f"${iva_neto:,.2f}", delta_color="inverse")
-                else:
-                    col_re3.metric("Remanente de IVA a Favor", f"${abs(iva_neto):,.2f}", delta_color="normal")
-                
-                # --- Sección de Ventas con Trazabilidad ---
-                st.markdown("---")
-                st.markdown("##### 📈 Detalle de Ventas (Trazabilidad DTE)")
-                if not df_sales.empty:
-                    col_m1, col_m2, col_m3 = st.columns(3)
-                    col_m1.metric("Subtotal Ventas", f"${v_val:,.2f}")
-                    col_m2.metric("IVA Ventas", f"${v_iva:,.2f}")
-                    col_m3.metric("Total Ventas", f"${v_tot:,.2f}")
+                    df_purch = extract_invoice_summary(envio.get('purch_json_list'))
                     
-                    st.dataframe(
-                        df_sales.style.format({
-                            "Venta Gravada": "${:,.2f}",
-                            "Descuentos": "${:,.2f}",
-                            "SubTotal": "${:,.2f}",
-                            "IVA (13%)": "${:,.2f}",
-                            "Total a Pagar": "${:,.2f}"
-                        }),
-                        use_container_width=True
-                    )
-                else:
-                    st.text("Sin registros de ventas detallados para este periodo.")
+                    v_val = df_sales['Valor'].sum() if not df_sales.empty else 0.0
+                    v_iva = df_sales['IVA'].sum() if not df_sales.empty else 0.0
+                    v_tot = df_sales['Total'].sum() if not df_sales.empty else 0.0
                     
-                # --- Sección de Compras con Trazabilidad ---
-                st.markdown("---")
-                st.markdown("##### 📉 Detalle de Compras y Gastos (Trazabilidad DTE)")
-                if not df_purch.empty:
-                    col_pm1, col_pm2, col_pm3 = st.columns(3)
-                    col_pm1.metric("Subtotal Compras", f"${p_val:,.2f}")
-                    col_pm2.metric("IVA Compras", f"${p_iva:,.2f}")
-                    col_pm3.metric("Total Compras", f"${p_tot:,.2f}")
+                    p_val = df_purch['Valor'].sum() if not df_purch.empty else 0.0
+                    p_iva = df_purch['IVA'].sum() if not df_purch.empty else 0.0
+                    p_tot = df_purch['Total'].sum() if not df_purch.empty else 0.0
                     
-                    st.dataframe(
-                        df_purch.style.format({
-                            "Venta Gravada": "${:,.2f}",
-                            "Descuentos": "${:,.2f}",
-                            "SubTotal": "${:,.2f}",
-                            "IVA (13%)": "${:,.2f}",
-                            "Total a Pagar": "${:,.2f}"
-                        }),
-                        use_container_width=True
-                    )
-                else:
-                    st.text("Sin registros de compras detallados para este periodo.")                        
+                    # --- Resumen Ejecutivo de IVA para el Cliente ---
+                    st.markdown("##### 💼 Resumen Ejecutivo de IVA")
+                    col_re1, col_re2, col_re3 = st.columns(3)
+                    col_re1.metric("Débito Fiscal (IVA Ventas)", f"${v_iva:,.2f}")
+                    col_re2.metric("Crédito Fiscal (IVA Compras)", f"${p_iva:,.2f}")
+                    
+                    iva_neto = v_iva - p_iva
+                    if iva_neto >= 0:
+                        col_re3.metric("IVA a Pagar Estimado", f"${iva_neto:,.2f}", delta_color="inverse")
+                    else:
+                        col_re3.metric("Remanente de IVA a Favor", f"${abs(iva_neto):,.2f}", delta_color="normal")
+                    
+                    # --- Sección de Ventas con Trazabilidad (Código de Generación + No. Control) ---
+                    st.markdown("---")
+                    st.markdown("##### 📈 Detalle de Ventas (Trazabilidad DTE)")
+                    if not df_sales.empty:
+                        col_m1, col_m2, col_m3 = st.columns(3)
+                        col_m1.metric("Subtotal Ventas", f"${v_val:,.2f}")
+                        col_m2.metric("IVA Ventas", f"${v_iva:,.2f}")
+                        col_m3.metric("Total Ventas", f"${v_tot:,.2f}")
+                        
+                        st.dataframe(
+                            df_sales.style.format({
+                                "Valor": "${:,.2f}",
+                                "IVA": "${:,.2f}",
+                                "Total": "${:,.2f}"
+                            }),
+                            use_container_width=True
+                        )
+                    else:
+                        st.text("Sin registros de ventas detallados para este periodo.")
+                        
                     # --- Sección de Compras con Trazabilidad ---
                     st.markdown("---")
                     st.markdown("##### 📉 Detalle de Compras y Gastos (Trazabilidad DTE)")
