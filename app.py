@@ -186,6 +186,29 @@ def extract_invoice_summary(file_list):
                 })
     return pd.DataFrame(summary_data)
 
+def calcular_empleado_quincenal(salario_mensual, comisiones, h_diurnas, h_nocturnas, otras_deducciones):
+    """Cálculo integral de planilla quincenal con ISSS, AFP y Renta (El Salvador)"""
+    tarifa_hora = (salario_mensual / 30.0) / 8.0
+    pago_diurnas = h_diurnas * tarifa_hora * 2.0
+    pago_nocturnas = h_nocturnas * tarifa_hora * 2.25
+    total_gravable = (salario_mensual / 2.0) + comisiones + pago_diurnas + pago_nocturnas
+    
+    isss = min(total_gravable * 0.03, 15.00)
+    afp = min(total_gravable * 0.0725, 3522.53)
+    base_renta = max(total_gravable - isss - afp, 0.0)
+    
+    if base_renta <= 275.00: 
+        renta = 0.0
+    elif base_renta <= 447.62: 
+        renta = ((base_renta - 275.00) * 0.10) + 8.83
+    elif base_renta <= 1019.05: 
+        renta = ((base_renta - 447.62) * 0.20) + 30.00
+    else: 
+        renta = ((base_renta - 1019.05) * 0.30) + 144.28
+        
+    liquido = total_gravable - isss - afp - renta - otras_deducciones
+    return total_gravable, isss, afp, renta, liquido
+
 # --- Inicialización de Estados de Sesión ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -435,17 +458,33 @@ def client_dashboard():
                     st.warning("Adjunta al menos un archivo JSON principal antes de enviar.")
 
     with client_tab2:
-        st.subheader("💼 MANTENIMIENTO DE PERSONAL Y PLANILLA QUINCENAL")
+        st.subheader("💼 GENERADOR DE PLANILLAS Y CÁLCULOS FISCALES (ISSS, AFP, RENTA)")
+        st.info("ℹ️ Cálculo automático de deducciones de ley para El Salvador según ingresos y horas extras.")
+        
         with st.form("form_planilla_quincenal"):
-            q_empleado = st.text_input("Nombre del Empleado Quincenal")
-            q_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, step=10.0, key="q_sal")
-            q_bono = st.number_input("Bonificaciones / Otros Ingresos ($)", min_value=0.0, step=5.0, key="q_bono")
+            col_q1, col_q2 = st.columns(2)
+            with col_q1:
+                q_empleado = st.text_input("Nombre del Empleado Quincenal")
+                q_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, step=10.0, value=600.0, key="q_sal")
+                q_comisiones = st.number_input("Comisiones / Otros Ingresos ($)", min_value=0.0, step=5.0, key="q_com")
+            with col_q2:
+                h_diurnas = st.number_input("Horas Extras Diurnas (200%)", min_value=0.0, step=1.0, key="h_d")
+                h_nocturnas = st.number_input("Horas Extras Nocturnas (225%)", min_value=0.0, step=1.0, key="h_n")
+                otras_deducciones = st.number_input("Otras Deducciones / Anticipos ($)", min_value=0.0, step=5.0, key="otras_ded")
             
-            btn_q = st.form_submit_button("Calcular Quincena", use_container_width=True)
+            btn_q = st.form_submit_button("Calcular Planilla Quincenal", use_container_width=True)
             if btn_q:
-                base_quincenal = (q_salario / 2.0) + q_bono
-                st.success(f"Resultado para {q_empleado or 'Empleado'} ({quincena_op}):")
-                st.metric("Total Devengado Quincenal", f"${base_quincenal:,.2f}")
+                tot_grav, isss_val, afp_val, renta_val, liquido_val = calcular_empleado_quincenal(
+                    q_salario, q_comisiones, h_diurnas, h_nocturnas, otras_deducciones
+                )
+                st.success(f"Resultado Quincenal para: **{q_empleado or 'Empleado'}** ({quincena_op})")
+                
+                mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+                mc1.metric("Total Devengado", f"${tot_grav:,.2f}")
+                mc2.metric("ISSS (3%)", f"${isss_val:,.2f}")
+                mc3.metric("AFP (7.25%)", f"${afp_val:,.2f}")
+                mc4.metric("Renta", f"${renta_val:,.2f}")
+                mc5.metric("Líquido a Recibir", f"${liquido_val:,.2f}")
 
     with client_tab3:
         st.subheader("📊 Historial de Declaraciones, Resumen Ejecutivo de IVA y Trazabilidad DTE")
