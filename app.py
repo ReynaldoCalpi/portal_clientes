@@ -8,7 +8,7 @@ import zipfile
 
 # Configuración de la página
 st.set_page_config(
-    page_title="Portal de Clientes - RI Consultores",
+    page_title="Portal de Contribuyente - RI Consultores",
     page_icon="📊",
     layout="wide"
 )
@@ -84,7 +84,6 @@ def extract_invoice_summary(file_list):
                 
                 items = content if isinstance(content, list) else [content]
                 for item in items:
-                    # Búsqueda estructurada del número de control comenzando con DTE-03
                     doc_num = None
                     nc_root = item.get("numeroControl")
                     if nc_root and str(nc_root).startswith("DTE-03"):
@@ -105,7 +104,6 @@ def extract_invoice_summary(file_list):
                             file_info["name"]
                         )
                     
-                    # Extracción de Código de Generación (UUID) para trazabilidad total
                     gen_code = None
                     if isinstance(ident, dict):
                         gen_code = ident.get("codigoGeneracion")
@@ -116,7 +114,6 @@ def extract_invoice_summary(file_list):
                     if not isinstance(resumen, dict):
                         resumen = {}
                     
-                    # Extracción de Valor / Gravada / Subtotal
                     val = (
                         resumen.get("totalGravada") or 
                         resumen.get("subTotal") or 
@@ -128,7 +125,6 @@ def extract_invoice_summary(file_list):
                         0.0
                     )
                     
-                    # Extracción de IVA (incluyendo campos directos o búsqueda en matriz de tributos)
                     iva = (
                         resumen.get("totalIva") or 
                         resumen.get("iva") or 
@@ -152,7 +148,6 @@ def extract_invoice_summary(file_list):
                         if iva_tributos > 0:
                             iva = iva_tributos
 
-                    # Extracción de Total a Pagar
                     total = (
                         resumen.get("totalPagar") or 
                         resumen.get("montoTotalOperacion") or 
@@ -162,7 +157,6 @@ def extract_invoice_summary(file_list):
                         0.0
                     )
                     
-                    # Ecuaciones de validación y balance financiero cruzado
                     try:
                         val_f = float(val) if val is not None else 0.0
                         iva_f = float(iva) if iva is not None else 0.0
@@ -246,7 +240,7 @@ def admin_dashboard():
     st.title("🎛️ Panel de Control - Administrador")
     st.markdown("Supervisa el cumplimiento fiscal, administra cuentas y revisa los documentos cargados en tiempo real.")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 Estatus y Archivos Recibidos", "➕ Crear Nuevo Usuario", "👥 Listado de Cuentas", "🧮 Cálculo de Planillas"])
+    tab1, tab2, tab3 = st.tabs(["📋 Estatus y Archivos Recibidos", "➕ Crear Nuevo Usuario", "👥 Listado de Cuentas"])
     
     with tab1:
         st.subheader("Control de Recepción y Descarga de Documentos")
@@ -265,12 +259,10 @@ def admin_dashboard():
             st.success(f"Se encontraron {len(envios_periodo)} entregas para el periodo {periodo_seleccionado}.")
             for idx, envio in enumerate(envios_periodo):
                 with st.expander(f"📁 {envio['client']} — Entregado el {envio['fecha']}"):
-                    
                     if envio.get('notes'):
                         st.info(f"**📝 Notas / Aclaraciones del Cliente:**\n\n{envio['notes']}")
                     
                     col_d1, col_d2 = st.columns(2)
-                    
                     with col_d1:
                         st.markdown("**📈 Ventas:**")
                         has_sales = envio.get('sales_json_list') or envio.get('sales_pdf_list')
@@ -335,49 +327,18 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-    with tab4:
-        st.subheader("🧮 Módulo de Cálculo de Planillas")
-        tipo_calculo = st.radio(
-            "Seleccione la modalidad de cálculo:",
-            ["Quincenal (Estándar)", "Mensual para Eventuales"],
-            horizontal=True
-        )
-        
-        with st.form("form_calculo_planilla"):
-            col_p1, col_p2 = st.columns(2)
-            with col_p1:
-                empleado_nombre = st.text_input("Nombre del Empleado / Eventual")
-                monto_base = st.number_input("Monto / Salario Base ($)", min_value=0.0, step=10.0)
-            with col_p2:
-                if tipo_calculo == "Mensual para Eventuales":
-                    st.info("ℹ️ Cálculo mensual aplicado a personal eventual (acumulado o pago único mensual).")
-                    factor_divisor = 1.0
-                else:
-                    st.info("ℹ️ Cálculo estándar dividido por quincena (2 pagos por mes).")
-                    factor_divisor = 2.0
-                
-                bonificacion = st.number_input("Bonificaciones / Extras ($)", min_value=0.0, step=5.0)
-                
-            calcular_btn = st.form_submit_button("Calcular Planilla", use_container_width=True)
-            
-            if calcular_btn:
-                total_percepcion = (monto_base / factor_divisor) + bonificacion if factor_divisor > 2.0 or tipo_calculo == "Mensual para Eventuales" else (monto_base / factor_divisor) + bonificacion
-                if tipo_calculo == "Mensual para Eventuales":
-                    total_percepcion = monto_base + bonificacion
-                
-                st.success(f"Resultado del cálculo ({tipo_calculo}):")
-                st.metric(label="Total a Pagar", value=f"${total_percepcion:,.2f}")
-
-# --- Panel del Cliente (Blindado y con Notas Aclaratorias Integradas) ---
+# --- Panel del Cliente con la Estructura Solicitada ---
 def client_dashboard():
-    st.title(f"📁 Portal de Contribuyente — {st.session_state.username}")
-    st.markdown("Gestión y auditoría de documentos tributarios electrónicos.")
+    st.title(f"📁 PORTAL DE CONTRIBUYENTE — {st.session_state.username}")
+    st.markdown("Gestión documental, notas aclaratorias y generación de planillas fiscales.")
     
-    col_p1, col_p2 = st.columns(2)
+    col_p1, col_p2, col_p3 = st.columns(3)
     with col_p1:
-        mes = st.selectbox("Periodo Fiscal - Mes", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=5, key="client_mes")
+        mes = st.selectbox("MES FISCAL", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=5, key="client_mes")
     with col_p2:
-        anio = st.selectbox("Periodo Fiscal - Año", [2026, 2025], index=0, key="client_anio")
+        anio = st.selectbox("AÑO FISCAL", [2026, 2025], index=0, key="client_anio")
+    with col_p3:
+        quincena_op = st.selectbox("QUINCENA", ["Primera Quincena (Del 1 al 15)", "Segunda Quincena (Del 16 al Fin de Mes)"], key="client_quincena")
         
     periodo_str = f"{mes} {anio}"
     
@@ -390,11 +351,16 @@ def client_dashboard():
     if envio_actual:
         st.success(f"✔️ **Periodo {periodo_str} al día:** Tus documentos han sido recibidos correctamente y se encuentran en proceso de auditoría por RI Consultores.")
     else:
-        st.warning(f"⚠️ **Acción requerida para {periodo_str}:** Aún no has enviado la información de tus documentos de Ventas y Compras. Por favor cárgalos en la pestaña de abajo.")
+        st.warning(f"⚠️ **Acción requerida para {periodo_str}:** Aún no has enviado la información de tus documentos de Ventas y Compras. Por favor cárgalos en la pestaña correspondiente.")
         
     st.divider()
     
-    client_tab1, client_tab2 = st.tabs(["📤 Cargar Documentos y Notas", "📊 Historial, Resumen de IVA y Trazabilidad"])
+    # --- PESTAÑAS PRINCIPALES SEGÚN SOLICITUD ---
+    client_tab1, client_tab2, client_tab3 = st.tabs([
+        "📁 CARGA DOCUMENTAL Y NOTAS", 
+        "💼 GENERADOR DE PLANILLAS", 
+        "📊 HISTORIAL Y RESUMEN"
+    ])
     
     with client_tab1:
         with st.form("upload_form"):
@@ -413,8 +379,8 @@ def client_dashboard():
             st.divider()
             st.subheader("📝 Notas Aclaratorias, Sugerencias y Observaciones por Documento o Mes")
             client_notes = st.text_area(
-                "Usa este espacio para detallar aclaraciones sobre documentos específicos (ej. números de control anulados, notas de crédito asociadas, gastos mixtos o particulares del mes):",
-                placeholder="Ej. El DTE-03 número... corresponde a una anulación extemporánea. La factura de compra... incluye un gasto parcialmente deducible...",
+                "Usa este espacio para detallar aclaraciones sobre documentos específicos:",
+                placeholder="Ej. El DTE-03 número... corresponde a una anulación extemporánea...",
                 key="notes_input"
             )
                 
@@ -468,13 +434,53 @@ def client_dashboard():
                     st.warning("Adjunta al menos un archivo JSON principal antes de enviar.")
 
     with client_tab2:
+        st.subheader("💼 MÓDULO DE GENERACIÓN Y CÁLCULOS DE PLANILLAS")
+        
+        # Sub-pestañas o opciones dentro del generador de planillas para separar la parte quincenal y eventuales 10%
+        sub_gen_tab1, sub_gen_tab2 = st.tabs([
+            "📋 Mantenimiento y Planilla Quincenal", 
+            "🧾 Cálculos Mensuales para Eventuales (10%)"
+        ])
+        
+        with sub_gen_tab1:
+            st.markdown("#### Mantenimiento de Personal y Planilla Quincenal")
+            with st.form("form_planilla_quincenal"):
+                q_empleado = st.text_input("Nombre del Empleado Quincenal")
+                q_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, step=10.0, key="q_sal")
+                q_bono = st.number_input("Bonificaciones / Otros Ingresos ($)", min_value=0.0, step=5.0, key="q_bono")
+                
+                btn_q = st.form_submit_button("Calcular Quincena", use_container_width=True)
+                if btn_q:
+                    base_quincenal = (q_salario / 2.0) + q_bono
+                    st.success(f"Resultado para {q_empleado or 'Empleado'} ({quincena_op}):")
+                    st.metric("Total Devengado Quincenal", f"${base_quincenal:,.2f}")
+        
+        with sub_gen_tab2:
+            st.markdown("#### 🧾 Cálculos Mensuales para Eventuales (Retención del 10% Renta)")
+            st.info("ℹ️ Este módulo calcula de forma automática el monto bruto, aplica la retención fiscal del 10% correspondiente a servicios eventuales/honorarios y determina el líquido a pagar.")
+            
+            with st.form("form_eventuales_10"):
+                ev_nombre = st.text_input("Nombre del Personal Eventual / Prestador de Servicios")
+                ev_monto = st.number_input("Monto Bruto Acumulado del Mes / Factura ($)", min_value=0.0, step=10.0, key="ev_monto")
+                
+                btn_ev = st.form_submit_button("Calcular Retención del 10%", use_container_width=True)
+                if btn_ev:
+                    retencion_10 = ev_monto * 0.10
+                    liquido_pagar = ev_monto - retencion_10
+                    
+                    st.success(f"Cálculo Mensual para Eventual: **{ev_nombre or 'General'}**")
+                    col_e1, col_e2, col_e3 = st.columns(3)
+                    col_e1.metric("Monto Bruto", f"${ev_monto:,.2f}")
+                    col_e2.metric("Retención de Renta (10%)", f"${retencion_10:,.2f}")
+                    col_e3.metric("Líquido a Pagar", f"${liquido_pagar:,.2f}")
+
+    with client_tab3:
         st.subheader("📊 Historial de Declaraciones, Resumen Ejecutivo de IVA y Trazabilidad DTE")
         
         if mis_envios:
             st.info("Visualiza el detalle de tus declaraciones, las notas enviadas, el resumen de IVA y los códigos de generación correspondientes.")
             for envio in mis_envios:
                 with st.expander(f"📅 Periodo: {envio['periodo']} — Entregado el {envio['fecha']}"):
-                    
                     if envio.get('notes'):
                         st.markdown("##### 📝 Tus Notas / Aclaraciones Enviadas")
                         st.info(envio['notes'])
