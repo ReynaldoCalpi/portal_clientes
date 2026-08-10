@@ -377,7 +377,7 @@ def client_dashboard():
     
     current_user_id = st.session_state.get("user_id", st.session_state.username)
     all_submissions = load_submissions()
-    mis_envios = [s for s in all_submissions if s.get("user_id") == current_user_id or s.get("client") == st.session_state.username]
+    mis_envios = [s for s in all_submissions if s.get("user_id") == current_user_id or s.get("client"] == st.session_state.username]
     envio_actual = next((s for s in mis_envios if s["periodo"] == periodo_str), None)
     
     st.markdown("### 📌 Estatus y Acciones Requeridas")
@@ -468,38 +468,28 @@ def client_dashboard():
 
     with client_tab2:
         st.subheader("💼 GENERADOR DE PLANILLAS Y RETENCIONES")
-        st.info("ℹ️ Selecciona el tipo de régimen y el periodo de cálculo (Primera Quincena, Segunda Quincena o Mensual con Retención del 10%).")
+        st.info("ℹ️ Marca la casilla si el empleado es eventual (cálculo mensual directo con retención fija del 10%, sin tramos ni quincenas).")
         
         with st.form("form_planilla_general"):
-            col_sel1, col_sel2 = st.columns(2)
-            with col_sel1:
-                tipo_regimen = st.selectbox("Tipo de Régimen / Cálculo", ["Tramo de Ley", "Código 60", "Retención 10%"])
-            with col_sel2:
-                periodo_calculo = st.selectbox(
-                    "Periodo de Cálculo", 
-                    [
-                        "Primera Quincena", 
-                        "Segunda Quincena", 
-                        "Mensual Retenciones 10%"
-                    ]
-                )
-                
+            # CHECKBOX DIRECTO PARA EVENTUAL MENSUAL
+            es_eventual = st.checkbox("👤 Marcar como Empleado Eventual (Pago mensual y retención fija 10%, sin tablas ni tramos de ley)")
+            
             st.divider()
             
             col_q1, col_q2 = st.columns(2)
             with col_q1:
-                q_empleado = st.text_input("Nombre del Empleado / Prestador Eventual")
+                q_empleado = st.text_input("Nombre del Empleado / Prestador")
                 q_salario = st.number_input("Salario Base / Honorario ($)", min_value=0.0, step=10.0, value=600.0, key="q_sal")
                 q_comisiones = st.number_input("Comisiones / Otros Ingresos ($)", min_value=0.0, step=5.0, key="q_com")
             with col_q2:
-                h_diurnas = st.number_input("Horas Extras Diurnas (200%)", min_value=0.0, step=1.0, key="h_d")
-                h_nocturnas = st.number_input("Horas Extras Nocturnas (225%)", min_value=0.0, step=1.0, key="h_n")
+                h_diurnas = st.number_input("Horas Extras Diurnas", min_value=0.0, step=1.0, key="h_d")
+                h_nocturnas = st.number_input("Horas Extras Nocturnas", min_value=0.0, step=1.0, key="h_n")
                 otras_deducciones = st.number_input("Otras Deducciones / Anticipos ($)", min_value=0.0, step=5.0, key="otras_ded")
             
             btn_q = st.form_submit_button("Calcular Planilla / Retención", use_container_width=True)
             if btn_q:
-                if periodo_calculo == "Mensual Retenciones 10%":
-                    # Cálculo mensual para eventual (10% renta fijo, sin cortes quincenales ni ISSS/AFP)
+                if es_eventual:
+                    # Cálculo eventual mensual simple (10% fijo, sin ISSS/AFP, sin tablas)
                     tarifa_hora = (q_salario / 30.0) / 8.0
                     pago_diurnas = h_diurnas * tarifa_hora * 2.0
                     pago_nocturnas = h_nocturnas * tarifa_hora * 2.25
@@ -510,7 +500,7 @@ def client_dashboard():
                     renta_val = total_gravable * 0.10
                     liquido_val = total_gravable - renta_val - otras_deducciones
                     
-                    st.success(f"Resultado Mensual (10%) para: **{q_empleado or 'Personal Eventual'}** ({mes} {anio})")
+                    st.success(f"Resultado Eventual Mensual (10%) para: **{q_empleado or 'Prestador Eventual'}** ({mes} {anio})")
                     
                     mc1, mc2, mc3, mc4, mc5 = st.columns(5)
                     mc1.metric("Total Devengado Mensual", f"${total_gravable:,.2f}")
@@ -519,11 +509,11 @@ def client_dashboard():
                     mc4.metric("Renta (10%)", f"${renta_val:,.2f}")
                     mc5.metric("Líquido a Recibir", f"${liquido_val:,.2f}")
                 else:
-                    # Cálculo quincenal habitual para empleados fijos
+                    # Cálculo quincenal habitual con tramos de ley
                     tot_grav, isss_val, afp_val, renta_val, liquido_val = calcular_empleado_quincenal(
                         q_salario, q_comisiones, h_diurnas, h_nocturnas, otras_deducciones
                     )
-                    st.success(f"Resultado Quincenal ({periodo_calculo}) - Régimen: {tipo_regimen} para: **{q_empleado or 'Empleado Fijo'}**")
+                    st.success(f"Resultado Quincenal con Tramos de Ley para: **{q_empleado or 'Empleado Fijo'}**")
                     
                     mc1, mc2, mc3, mc4, mc5 = st.columns(5)
                     mc1.metric("Total Devengado", f"${tot_grav:,.2f}")
