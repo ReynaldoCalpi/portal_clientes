@@ -327,7 +327,7 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-# --- Panel del Cliente con la Estructura Solicitada ---
+# --- Panel del Cliente con las Pestañas Principales Solicitadas ---
 def client_dashboard():
     st.title(f"📁 PORTAL DE CONTRIBUYENTE — {st.session_state.username}")
     st.markdown("Gestión documental, notas aclaratorias y generación de planillas fiscales.")
@@ -355,11 +355,12 @@ def client_dashboard():
         
     st.divider()
     
-    # --- PESTAÑAS PRINCIPALES SEGÚN SOLICITUD ---
-    client_tab1, client_tab2, client_tab3 = st.tabs([
+    # --- PESTAÑAS PRINCIPALES DEL PORTAL ---
+    client_tab1, client_tab2, client_tab3, client_tab4 = st.tabs([
         "📁 CARGA DOCUMENTAL Y NOTAS", 
         "💼 GENERADOR DE PLANILLAS", 
-        "📊 HISTORIAL Y RESUMEN"
+        "📊 HISTORIAL Y RESUMEN",
+        "🧾 CÁLCULOS MENSUALES PARA EVENTUALES 10%"
     ])
     
     with client_tab1:
@@ -434,45 +435,17 @@ def client_dashboard():
                     st.warning("Adjunta al menos un archivo JSON principal antes de enviar.")
 
     with client_tab2:
-        st.subheader("💼 MÓDULO DE GENERACIÓN Y CÁLCULOS DE PLANILLAS")
-        
-        # Sub-pestañas o opciones dentro del generador de planillas para separar la parte quincenal y eventuales 10%
-        sub_gen_tab1, sub_gen_tab2 = st.tabs([
-            "📋 Mantenimiento y Planilla Quincenal", 
-            "🧾 Cálculos Mensuales para Eventuales (10%)"
-        ])
-        
-        with sub_gen_tab1:
-            st.markdown("#### Mantenimiento de Personal y Planilla Quincenal")
-            with st.form("form_planilla_quincenal"):
-                q_empleado = st.text_input("Nombre del Empleado Quincenal")
-                q_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, step=10.0, key="q_sal")
-                q_bono = st.number_input("Bonificaciones / Otros Ingresos ($)", min_value=0.0, step=5.0, key="q_bono")
-                
-                btn_q = st.form_submit_button("Calcular Quincena", use_container_width=True)
-                if btn_q:
-                    base_quincenal = (q_salario / 2.0) + q_bono
-                    st.success(f"Resultado para {q_empleado or 'Empleado'} ({quincena_op}):")
-                    st.metric("Total Devengado Quincenal", f"${base_quincenal:,.2f}")
-        
-        with sub_gen_tab2:
-            st.markdown("#### 🧾 Cálculos Mensuales para Eventuales (Retención del 10% Renta)")
-            st.info("ℹ️ Este módulo calcula de forma automática el monto bruto, aplica la retención fiscal del 10% correspondiente a servicios eventuales/honorarios y determina el líquido a pagar.")
+        st.subheader("💼 MANTENIMIENTO DE PERSONAL Y PLANILLA QUINCENAL")
+        with st.form("form_planilla_quincenal"):
+            q_empleado = st.text_input("Nombre del Empleado Quincenal")
+            q_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, step=10.0, key="q_sal")
+            q_bono = st.number_input("Bonificaciones / Otros Ingresos ($)", min_value=0.0, step=5.0, key="q_bono")
             
-            with st.form("form_eventuales_10"):
-                ev_nombre = st.text_input("Nombre del Personal Eventual / Prestador de Servicios")
-                ev_monto = st.number_input("Monto Bruto Acumulado del Mes / Factura ($)", min_value=0.0, step=10.0, key="ev_monto")
-                
-                btn_ev = st.form_submit_button("Calcular Retención del 10%", use_container_width=True)
-                if btn_ev:
-                    retencion_10 = ev_monto * 0.10
-                    liquido_pagar = ev_monto - retencion_10
-                    
-                    st.success(f"Cálculo Mensual para Eventual: **{ev_nombre or 'General'}**")
-                    col_e1, col_e2, col_e3 = st.columns(3)
-                    col_e1.metric("Monto Bruto", f"${ev_monto:,.2f}")
-                    col_e2.metric("Retención de Renta (10%)", f"${retencion_10:,.2f}")
-                    col_e3.metric("Líquido a Pagar", f"${liquido_pagar:,.2f}")
+            btn_q = st.form_submit_button("Calcular Quincena", use_container_width=True)
+            if btn_q:
+                base_quincenal = (q_salario / 2.0) + q_bono
+                st.success(f"Resultado para {q_empleado or 'Empleado'} ({quincena_op}):")
+                st.metric("Total Devengado Quincenal", f"${base_quincenal:,.2f}")
 
     with client_tab3:
         st.subheader("📊 Historial de Declaraciones, Resumen Ejecutivo de IVA y Trazabilidad DTE")
@@ -547,6 +520,25 @@ def client_dashboard():
                         st.text("Sin registros de compras detallados para este periodo.")
         else:
             st.warning("⚠️ Aún no has registrado envíos de documentos en el portal.")
+
+    with client_tab4:
+        st.subheader("🧾 Cálculos Mensuales para Eventuales (10% de Retención)")
+        st.info("ℹ️ Este módulo calcula de forma automática el monto bruto, aplica la retención fiscal del 10% correspondiente a servicios eventuales u honorarios y determina el líquido a pagar.")
+        
+        with st.form("form_eventuales_10"):
+            ev_nombre = st.text_input("Nombre del Personal Eventual / Prestador de Servicios")
+            ev_monto = st.number_input("Monto Bruto Acumulado del Mes / Factura ($)", min_value=0.0, step=10.0, key="ev_monto")
+            
+            btn_ev = st.form_submit_button("Calcular Retención del 10%", use_container_width=True)
+            if btn_ev:
+                retencion_10 = ev_monto * 0.10
+                liquido_pagar = ev_monto - retencion_10
+                
+                st.success(f"Cálculo Mensual para Eventual: **{ev_nombre or 'General'}**")
+                col_e1, col_e2, col_e3 = st.columns(3)
+                col_e1.metric("Monto Bruto", f"${ev_monto:,.2f}")
+                col_e2.metric("Retención de Renta (10%)", f"${retencion_10:,.2f}")
+                col_e3.metric("Líquido a Pagar", f"${liquido_pagar:,.2f}")
 
 # --- Control de Sesión ---
 if not st.session_state.logged_in:
