@@ -5,6 +5,9 @@ import json
 import os
 import io
 import zipfile
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 # Configuración de la página
 st.set_page_config(
@@ -723,12 +726,61 @@ def client_dashboard():
                         use_container_width=True
                     )
                     
-                    csv_data = df_planilla.to_csv(index=False).encode('utf-8')
+                    # Generación de Excel con formato profesional
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        df_planilla.to_excel(writer, index=False, sheet_name='Planilla Eventuales')
+                        workbook = writer.book
+                        worksheet = writer.sheets['Planilla Eventuales']
+                        
+                        # Estilos profesionales (Encabezado corporativo azul oscuro, bordes delgados, fuentes limpias)
+                        header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
+                        header_fill = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')
+                        align_center = Alignment(horizontal='center', vertical='center')
+                        align_right = Alignment(horizontal='right', vertical='center')
+                        align_left = Alignment(horizontal='left', vertical='center')
+                        
+                        thin_border = Border(
+                            left=Side(style='thin', color='D3D3D3'),
+                            right=Side(style='thin', color='D3D3D3'),
+                            top=Side(style='thin', color='D3D3D3'),
+                            bottom=Side(style='thin', color='D3D3D3')
+                        )
+                        
+                        # Aplicar formato a encabezados
+                        for col_num in range(1, len(df_planilla.columns) + 1):
+                            cell = worksheet.cell(row=1, column=col_num)
+                            cell.font = header_font
+                            cell.fill = header_fill
+                            cell.alignment = align_center
+                            cell.border = thin_border
+                            
+                        # Aplicar formato a filas de datos
+                        for row_idx in range(2, len(df_planilla) + 2):
+                            for col_idx in range(1, len(df_planilla.columns) + 1):
+                                cell = worksheet.cell(row=row_idx, column=col_idx)
+                                cell.border = thin_border
+                                if col_idx in [3, 4, 5]: # Monto Bruto, Retención, Líquido
+                                    cell.number_format = '$#,##0.00'
+                                    cell.alignment = align_right
+                                elif col_idx == 2: # DUI
+                                    cell.alignment = align_center
+                                else:
+                                    cell.alignment = align_left
+                                    
+                        # Auto-ajuste de ancho de columnas
+                        for col in worksheet.columns:
+                            max_len = max(len(str(cell.value or '')) for cell in col)
+                            col_letter = get_column_letter(col[0].column)
+                            worksheet.column_dimensions[col_letter].width = max(max_len + 4, 18)
+                            
+                    excel_data = output.getvalue()
+                    
                     st.download_button(
-                        label="📥 Descargar Planilla de Eventuales (CSV)",
-                        data=csv_data,
-                        file_name=f"Planilla_Eventuales_10_{periodo_str.replace(' ', '_')}.csv",
-                        mime="text/csv",
+                        label="📥 Descargar Planilla de Eventuales en Excel (Formato Profesional)",
+                        data=excel_data,
+                        file_name=f"Planilla_Eventuales_10_{periodo_str.replace(' ', '_')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
             else:
