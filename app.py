@@ -15,7 +15,6 @@ st.set_page_config(
 
 # --- Configuración de Persistencia en Disco ---
 DB_FILE = "submissions_db.json"
-EMPLOYEES_DB = "employees_db.json"
 UPLOAD_DIR = "uploaded_files"
 
 if not os.path.exists(UPLOAD_DIR):
@@ -35,40 +34,6 @@ def save_submission_to_disk(submission_data):
     submissions.append(submission_data)
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(submissions, f, ensure_ascii=False, indent=4)
-
-# --- Funciones de Persistencia para Empleados / Planillas ---
-def load_employee_db():
-    if os.path.exists(EMPLOYEES_DB):
-        try:
-            with open(EMPLOYEES_DB, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
-
-def save_employee_record(employee_data):
-    employees = load_employee_db()
-    employees.append(employee_data)
-    with open(EMPLOYEES_DB, "w", encoding="utf-8") as f:
-        json.dump(employees, f, ensure_ascii=False, indent=4)
-
-def calcular_empleado_quincenal(salario_mensual, comisiones, h_diurnas, h_nocturnas, otras_deducciones):
-    tarifa_hora = (salario_mensual / 30.0) / 8.0
-    pago_diurnas = h_diurnas * tarifa_hora * 2.0
-    pago_nocturnas = h_nocturnas * tarifa_hora * 2.25
-    total_gravable = (salario_mensual / 2.0) + comisiones + pago_diurnas + pago_nocturnas
-    
-    isss = min(total_gravable * 0.03, 15.00)
-    afp = min(total_gravable * 0.0725, 3522.53)
-    base_renta = max(total_gravable - isss - afp, 0.0)
-    
-    if base_renta <= 275.00: renta = 0.0
-    elif base_renta <= 447.62: renta = ((base_renta - 275.00) * 0.10) + 8.83
-    elif base_renta <= 1019.05: renta = ((base_renta - 447.62) * 0.20) + 30.00
-    else: renta = ((base_renta - 1019.05) * 0.30) + 144.28
-        
-    liquido = total_gravable - isss - afp - renta - otras_deducciones
-    return total_gravable, isss, afp, renta, liquido
 
 def save_files_to_folder(file_list, client_name, periodo_str, category):
     saved_files_info = []
@@ -236,8 +201,6 @@ if "username" not in st.session_state:
     st.session_state.username = ""
 if "user_id" not in st.session_state:
     st.session_state.user_id = ""
-if "calc_result" not in st.session_state:
-    st.session_state.calc_result = None
 
 if "clients_db" not in st.session_state:
     st.session_state.clients_db = {}
@@ -283,7 +246,7 @@ def admin_dashboard():
     st.title("🎛️ Panel de Control - Administrador")
     st.markdown("Supervisa el cumplimiento fiscal, administra cuentas y revisa los documentos cargados en tiempo real.")
     
-    tab1, tab2, tab3 = st.tabs(["📋 Estatus y Archivos Recibidos", "➕ Crear Nuevo Usuario", "👥 Listado de Cuentas"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 Estatus y Archivos Recibidos", "➕ Crear Nuevo Usuario", "👥 Listado de Cuentas", "🧮 Cálculo de Planillas"])
     
     with tab1:
         st.subheader("Control de Recepción y Descarga de Documentos")
@@ -372,7 +335,40 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-# --- Panel del Cliente ---
+    with tab4:
+        st.subheader("🧮 Módulo de Cálculo de Planillas")
+        tipo_calculo = st.radio(
+            "Seleccione la modalidad de cálculo:",
+            ["Quincenal (Estándar)", "Mensual para Eventuales"],
+            horizontal=True
+        )
+        
+        with st.form("form_calculo_planilla"):
+            col_p1, col_p2 = st.columns(2)
+            with col_p1:
+                empleado_nombre = st.text_input("Nombre del Empleado / Eventual")
+                monto_base = st.number_input("Monto / Salario Base ($)", min_value=0.0, step=10.0)
+            with col_p2:
+                if tipo_calculo == "Mensual para Eventuales":
+                    st.info("ℹ️ Cálculo mensual aplicado a personal eventual (acumulado o pago único mensual).")
+                    factor_divisor = 1.0
+                else:
+                    st.info("ℹ️ Cálculo estándar dividido por quincena (2 pagos por mes).")
+                    factor_divisor = 2.0
+                
+                bonificacion = st.number_input("Bonificaciones / Extras ($)", min_value=0.0, step=5.0)
+                
+            calcular_btn = st.form_submit_button("Calcular Planilla", use_container_width=True)
+            
+            if calcular_btn:
+                total_percepcion = (monto_base / factor_divisor) + bonificacion if factor_divisor > 2.0 or tipo_calculo == "Mensual para Eventuales" else (monto_base / factor_divisor) + bonificacion
+                if tipo_calculo == "Mensual para Eventuales":
+                    total_percepcion = monto_base + bonificacion
+                
+                st.success(f"Resultado del cálculo ({tipo_calculo}):")
+                st.metric(label="Total a Pagar", value=f"${total_percepcion:,.2f}")
+
+# --- Panel del Cliente (Blindado y con Notas Aclaratorias Integradas) ---
 def client_dashboard():
     st.title(f"📁 Portal de Contribuyente — {st.session_state.username}")
     st.markdown("Gestión y auditoría de documentos tributarios electrónicos.")
@@ -398,11 +394,7 @@ def client_dashboard():
         
     st.divider()
     
-    client_tab1, client_tab2, client_tab3 = st.tabs([
-        "📤 Cargar Documentos y Notas", 
-        "📊 Historial, Resumen de IVA y Trazabilidad",
-        "💼 Generador de Planillas"
-    ])
+    client_tab1, client_tab2 = st.tabs(["📤 Cargar Documentos y Notas", "📊 Historial, Resumen de IVA y Trazabilidad"])
     
     with client_tab1:
         with st.form("upload_form"):
@@ -421,8 +413,8 @@ def client_dashboard():
             st.divider()
             st.subheader("📝 Notas Aclaratorias, Sugerencias y Observaciones por Documento o Mes")
             client_notes = st.text_area(
-                "Usa este espacio para detallar aclaraciones sobre documentos específicos:",
-                placeholder="Ej. El DTE-03 número... corresponde a una anulación extemporánea...",
+                "Usa este espacio para detallar aclaraciones sobre documentos específicos (ej. números de control anulados, notas de crédito asociadas, gastos mixtos o particulares del mes):",
+                placeholder="Ej. El DTE-03 número... corresponde a una anulación extemporánea. La factura de compra... incluye un gasto parcialmente deducible...",
                 key="notes_input"
             )
                 
@@ -549,81 +541,6 @@ def client_dashboard():
                         st.text("Sin registros de compras detallados para este periodo.")
         else:
             st.warning("⚠️ Aún no has registrado envíos de documentos en el portal.")
-
-    with client_tab3:
-        st.subheader("💼 Generador de Planillas, Retenciones y Guardado de Empleados")
-        with st.form("form_planilla"):
-            es_eventual = st.checkbox("👤 Marcar como Empleado Eventual / Prestador de Servicios (10% fijo)")
-            q_empleado = st.text_input("Nombre del Empleado / Prestador")
-            q_dui = st.text_input("Número de DUI", placeholder="00000000-0")
-            q_salario = st.number_input("Salario Base / Mensual ($)", min_value=0.0, value=600.0)
-            q_comisiones = st.number_input("Comisiones ($)", min_value=0.0, value=0.0)
-            h_diurnas = st.number_input("Horas Extras Diurnas", min_value=0.0, value=0.0)
-            h_nocturnas = st.number_input("Horas Extras Nocturnas", min_value=0.0, value=0.0)
-            otras_ded = st.number_input("Otras Deducciones ($)", min_value=0.0, value=0.0)
-            
-            calcular_btn = st.form_submit_button("Calcular Planilla", use_container_width=True)
-            if calcular_btn:
-                if q_empleado.strip() == "":
-                    st.warning("Por favor ingresa el nombre del empleado.")
-                else:
-                    if es_eventual:
-                        tarifa_h_ev = (q_salario / 30.0) / 8.0
-                        p_diurnas_ev = h_diurnas * tarifa_h_ev * 2.0
-                        p_nocturnas_ev = h_nocturnas * tarifa_h_ev * 2.25
-                        tot_grav = (q_salario / 2.0) + q_comisiones + p_diurnas_ev + p_nocturnas_ev
-                        renta = tot_grav * 0.10
-                        liquido = tot_grav - renta - otras_ded
-                        st.session_state.calc_result = {
-                            "Tipo": "Eventual (10%)",
-                            "Nombre": q_empleado,
-                            "DUI": q_dui,
-                            "Total Devengado": round(tot_grav, 2),
-                            "ISSS": 0.0,
-                            "AFP": 0.0,
-                            "Renta": round(renta, 2),
-                            "Líquido": round(liquido, 2),
-                            "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
-                        }
-                    else:
-                        tot_grav, isss, afp, renta, liq = calcular_empleado_quincenal(q_salario, q_comisiones, h_diurnas, h_nocturnas, otras_ded)
-                        st.session_state.calc_result = {
-                            "Tipo": "Quincenal",
-                            "Nombre": q_empleado,
-                            "DUI": q_dui,
-                            "Total Devengado": round(tot_grav, 2),
-                            "ISSS": round(isss, 2),
-                            "AFP": round(afp, 2),
-                            "Renta": round(renta, 2),
-                            "Líquido": round(liq, 2),
-                            "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
-                        }
-                    st.success("¡Cálculo realizado con éxito! Revisa el resultado abajo para guardarlo.")
-
-        if st.session_state.calc_result:
-            res = st.session_state.calc_result
-            st.markdown("##### 📌 Resultado del Cálculo Actual")
-            st.info(f"**Empleado:** {res['Nombre']} | **DUI:** {res['DUI'] or 'N/A'} | **Tipo:** {res['Tipo']}")
-            
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Devengado", f"${res['Total Devengado']:,.2f}")
-            m2.metric("Renta", f"${res['Renta']:,.2f}")
-            m3.metric("Otras/Seguridad", f"${res.get('ISSS', 0.0) + res.get('AFP', 0.0):,.2f}")
-            m4.metric("Líquido", f"${res['Líquido']:,.2f}")
-            
-            if st.button("💾 Guardar Registro de Empleado en Base de Datos", use_container_width=True):
-                save_employee_record(res)
-                st.success("¡Registro de empleado guardado correctamente en `employees_db.json`!")
-                st.session_state.calc_result = None
-                st.rerun()
-
-        st.divider()
-        st.subheader("📋 Base de Datos de Empleados / Prestadores Guardados")
-        emp_records = load_employee_db()
-        if emp_records:
-            st.dataframe(pd.DataFrame(emp_records), use_container_width=True)
-        else:
-            st.info("No hay empleados o prestadores guardados todavía.")
 
 # --- Control de Sesión ---
 if not st.session_state.logged_in:
