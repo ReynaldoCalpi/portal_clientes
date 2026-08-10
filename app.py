@@ -377,7 +377,7 @@ def client_dashboard():
     
     current_user_id = st.session_state.get("user_id", st.session_state.username)
     all_submissions = load_submissions()
-    mis_envios = [s for s in all_submissions if s.get("user_id") == current_user_id or s.get("client"] == st.session_state.username]
+    mis_envios = [s for s in all_submissions if s.get("user_id") == current_user_id or s.get("client") == st.session_state.username]
     envio_actual = next((s for s in mis_envios if s["periodo"] == periodo_str), None)
     
     st.markdown("### 📌 Estatus y Acciones Requeridas")
@@ -471,7 +471,6 @@ def client_dashboard():
         st.info("ℹ️ Marca la casilla si el empleado es eventual (cálculo mensual directo con retención fija del 10%, sin tramos ni quincenas).")
         
         with st.form("form_planilla_general"):
-            # CHECKBOX DIRECTO PARA EVENTUAL MENSUAL
             es_eventual = st.checkbox("👤 Marcar como Empleado Eventual (Pago mensual y retención fija 10%, sin tablas ni tramos de ley)")
             
             st.divider()
@@ -489,7 +488,6 @@ def client_dashboard():
             btn_q = st.form_submit_button("Calcular Planilla / Retención", use_container_width=True)
             if btn_q:
                 if es_eventual:
-                    # Cálculo eventual mensual simple (10% fijo, sin ISSS/AFP, sin tablas)
                     tarifa_hora = (q_salario / 30.0) / 8.0
                     pago_diurnas = h_diurnas * tarifa_hora * 2.0
                     pago_nocturnas = h_nocturnas * tarifa_hora * 2.25
@@ -509,7 +507,6 @@ def client_dashboard():
                     mc4.metric("Renta (10%)", f"${renta_val:,.2f}")
                     mc5.metric("Líquido a Recibir", f"${liquido_val:,.2f}")
                 else:
-                    # Cálculo quincenal habitual con tramos de ley
                     tot_grav, isss_val, afp_val, renta_val, liquido_val = calcular_empleado_quincenal(
                         q_salario, q_comisiones, h_diurnas, h_nocturnas, otras_deducciones
                     )
