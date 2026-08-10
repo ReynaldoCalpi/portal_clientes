@@ -250,7 +250,7 @@ def admin_dashboard():
     tab1, tab2, tab3 = st.tabs(["📋 Estatus y Archivos Recibidos", "➕ Crear Nuevo Usuario", "👥 Listado de Cuentas"])
     
     with tab1:
-        st.subheader("Control de Recepción y Descarga de Documentos")
+        st.subheader("Control de Recepción y Descarga de Documentos y Planillas")
         
         col_f1, col_f2 = st.columns(2)
         with col_f1:
@@ -263,46 +263,145 @@ def admin_dashboard():
         envios_periodo = [s for s in all_submissions if s["periodo"] == periodo_seleccionado]
         
         if envios_periodo:
-            st.success(f"Se encontraron {len(envios_periodo)} entregas para el periodo {periodo_seleccionado}.")
+            st.success(f"Se encontraron {len(envios_periodo)} registros/entregas para el periodo {periodo_seleccionado}.")
             for idx, envio in enumerate(envios_periodo):
-                with st.expander(f"📁 {envio['client']} — Entregado el {envio['fecha']}"):
-                    if envio.get('notes'):
-                        st.info(f"**📝 Notas / Aclaraciones del Cliente:**\n\n{envio['notes']}")
-                    
-                    col_d1, col_d2 = st.columns(2)
-                    with col_d1:
-                        st.markdown("**📈 Ventas:**")
-                        has_sales = envio.get('sales_json_list') or envio.get('sales_pdf_list')
-                        if has_sales:
-                            zip_sales_bytes = create_zip_buffer(envio.get('sales_json_list'), envio.get('sales_pdf_list'))
-                            safe_client_name = envio['client'].replace(" ", "_").replace(".", "")
-                            st.download_button(
-                                label="📦 Descargar todas las Ventas (ZIP)",
-                                data=zip_sales_bytes,
-                                file_name=f"Ventas_{safe_client_name}_{envio['periodo'].replace(' ', '_')}.zip",
-                                mime="application/zip",
-                                key=f"zip_sales_{idx}"
-                            )
-                        else:
-                            st.text("Sin archivos de ventas")
+                if envio.get("type") == "planilla_eventuales":
+                    with st.expander(f"🧾 [PLANILLA EVENTUALES] {envio['client']} — Entregado el {envio['fecha']}"):
+                        st.markdown(f"**Periodo Fiscal:** {envio['periodo']}")
+                        st.markdown(f"**Resumen Consolidado:** Total Bruto: **${envio['total_bruto']:,.2f}** | Retención 10%: **${envio['total_retencion']:,.2f}** | Líquido a Pagar: **${envio['total_liquido']:,.2f}**")
+                        
+                        # Regenerar Excel para el Administrador
+                        df_ev_admin = pd.DataFrame(envio['data'])
+                        output_adm = io.BytesIO()
+                        total_row_adm = pd.DataFrame([{
+                            "Prestador Eventual": "TOTALES GENERALES",
+                            "DUI": "",
+                            "Monto Bruto": envio['total_bruto'],
+                            "Retención 10%": envio['total_retencion'],
+                            "Líquido a Pagar": envio['total_liquido']
+                        }])
+                        df_exp_adm = pd.concat([df_ev_admin, total_row_adm], ignore_index=True)
+                        
+                        with pd.ExcelWriter(output_adm, engine='openpyxl') as writer:
+                            df_exp_adm.to_excel(writer, index=False, sheet_name='Planilla Eventuales', startrow=4)
+                            workbook = writer.book
+                            worksheet = writer.sheets['Planilla Eventuales']
                             
-                    with col_d2:
-                        st.markdown("**📉 Compras y Gastos:**")
-                        has_purch = envio.get('purch_json_list') or envio.get('purch_pdf_list')
-                        if has_purch:
-                            zip_purch_bytes = create_zip_buffer(envio.get('purch_json_list'), envio.get('purch_pdf_list'))
-                            safe_client_name = envio['client'].replace(" ", "_").replace(".", "")
-                            st.download_button(
-                                label="📦 Descargar todas las Compras (ZIP)",
-                                data=zip_purch_bytes,
-                                file_name=f"Compras_{safe_client_name}_{envio['periodo'].replace(' ', '_')}.zip",
-                                mime="application/zip",
-                                key=f"zip_purch_{idx}"
+                            worksheet['A1'] = "RI CONSULTORES — PLANILLA DE RETENCIÓN DE RENTA (10% EVENTUALES)"
+                            worksheet['A2'] = f"Periodo Fiscal / Mes de Referencia: {envio['periodo']}"
+                            worksheet['A3'] = f"Cliente / Contribuyente: {envio['client']}"
+                            
+                            title_font = Font(name='Calibri', size=12, bold=True, color='1F4E78')
+                            subtitle_font = Font(name='Calibri', size=10, bold=True, color='595959')
+                            header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
+                            header_fill = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')
+                            total_font = Font(name='Calibri', size=11, bold=True, color='000000')
+                            total_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
+                            
+                            align_center = Alignment(horizontal='center', vertical='center')
+                            align_right = Alignment(horizontal='right', vertical='center')
+                            align_left = Alignment(horizontal='left', vertical='center')
+                            
+                            thin_border = Border(
+                                left=Side(style='thin', color='D3D3D3'), right=Side(style='thin', color='D3D3D3'),
+                                top=Side(style='thin', color='D3D3D3'), bottom=Side(style='thin', color='D3D3D3')
                             )
-                        else:
-                            st.text("Sin archivos de compras")
+                            thick_bottom_border = Border(
+                                left=Side(style='thin', color='D3D3D3'), right=Side(style='thin', color='D3D3D3'),
+                                top=Side(style='thin', color='D3D3D3'), bottom=Side(style='double', color='000000')
+                            )
+                            
+                            worksheet['A1'].font = title_font
+                            worksheet['A2'].font = subtitle_font
+                            worksheet['A3'].font = subtitle_font
+                            
+                            header_row_idx = 5
+                            for col_num in range(1, len(df_exp_adm.columns) + 1):
+                                cell = worksheet.cell(row=header_row_idx, column=col_num)
+                                cell.font = header_font
+                                cell.fill = header_fill
+                                cell.alignment = align_center
+                                cell.border = thin_border
+                                
+                            total_row_idx = header_row_idx + len(df_exp_adm)
+                            for row_idx in range(header_row_idx + 1, total_row_idx + 1):
+                                is_total_row = (row_idx == total_row_idx)
+                                for col_idx in range(1, len(df_exp_adm.columns) + 1):
+                                    cell = worksheet.cell(row=row_idx, column=col_idx)
+                                    if is_total_row:
+                                        cell.font = total_font
+                                        cell.fill = total_fill
+                                        cell.border = thick_bottom_border
+                                    else:
+                                        cell.border = thin_border
+                                        
+                                    if col_idx in [3, 4, 5]:
+                                        cell.number_format = '$#,##0.00'
+                                        cell.alignment = align_right
+                                    elif col_idx == 2:
+                                        cell.alignment = align_center
+                                    else:
+                                        cell.alignment = align_left
+                                        
+                            for col in worksheet.columns:
+                                max_len = 0
+                                for cell in col:
+                                    if cell.row >= 5:
+                                        val_str = str(cell.value or '')
+                                        if len(val_str) > max_len:
+                                            max_len = len(val_str)
+                                col_letter = get_column_letter(col[0].column)
+                                worksheet.column_dimensions[col_letter].width = max(max_len + 4, 18)
+                                
+                        excel_adm_data = output_adm.getvalue()
+                        safe_c_name = envio['client'].replace(" ", "_").replace(".", "")
+                        
+                        st.download_button(
+                            label="📥 Descargar Planilla de Eventuales del Cliente (Excel)",
+                            data=excel_adm_data,
+                            file_name=f"Planilla_Eventuales_10_{safe_c_name}_{envio['periodo'].replace(' ', '_')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"dl_adm_ev_{idx}"
+                        )
+                else:
+                    with st.expander(f"📁 {envio['client']} — Entregado el {envio['fecha']}"):
+                        if envio.get('notes'):
+                            st.info(f"**📝 Notas / Aclaraciones del Cliente:**\n\n{envio['notes']}")
+                        
+                        col_d1, col_d2 = st.columns(2)
+                        with col_d1:
+                            st.markdown("**📈 Ventas:**")
+                            has_sales = envio.get('sales_json_list') or envio.get('sales_pdf_list')
+                            if has_sales:
+                                zip_sales_bytes = create_zip_buffer(envio.get('sales_json_list'), envio.get('sales_pdf_list'))
+                                safe_client_name = envio['client'].replace(" ", "_").replace(".", "")
+                                st.download_button(
+                                    label="📦 Descargar todas las Ventas (ZIP)",
+                                    data=zip_sales_bytes,
+                                    file_name=f"Ventas_{safe_client_name}_{envio['periodo'].replace(' ', '_')}.zip",
+                                    mime="application/zip",
+                                    key=f"zip_sales_{idx}"
+                                )
+                            else:
+                                st.text("Sin archivos de ventas")
+                                
+                        with col_d2:
+                            st.markdown("**📉 Compras y Gastos:**")
+                            has_purch = envio.get('purch_json_list') or envio.get('purch_pdf_list')
+                            if has_purch:
+                                zip_purch_bytes = create_zip_buffer(envio.get('purch_json_list'), envio.get('purch_pdf_list'))
+                                safe_client_name = envio['client'].replace(" ", "_").replace(".", "")
+                                st.download_button(
+                                    label="📦 Descargar todas las Compras (ZIP)",
+                                    data=zip_purch_bytes,
+                                    file_name=f"Compras_{safe_client_name}_{envio['periodo'].replace(' ', '_')}.zip",
+                                    mime="application/zip",
+                                    key=f"zip_purch_{idx}"
+                                )
+                            else:
+                                st.text("Sin archivos de compras")
         else:
-            st.info(f"No hay documentos registrados para el periodo {periodo_seleccionado} todavía.")
+            st.info(f"No hay documentos ni planillas registrados para el periodo {periodo_seleccionado} todavía.")
 
     with tab2:
         st.subheader("Dar de alta a un nuevo cliente")
@@ -352,7 +451,7 @@ def client_dashboard():
     current_user_id = st.session_state.get("user_id", st.session_state.username)
     all_submissions = load_submissions()
     mis_envios = [s for s in all_submissions if s.get("user_id") == current_user_id or s.get("client") == st.session_state.username]
-    envio_actual = next((s for s in mis_envios if s["periodo"] == periodo_str), None)
+    envio_actual = next((s for s in mis_envios if s["periodo"] == periodo_str and s.get("type") != "planilla_eventuales"), None)
     
     st.markdown("### 📌 Estatus y Acciones Requeridas")
     if envio_actual:
@@ -523,6 +622,8 @@ def client_dashboard():
         if mis_envios:
             st.info("Visualiza el detalle de tus declaraciones, las notas enviadas, el resumen de IVA y los códigos de generación correspondientes.")
             for envio in mis_envios:
+                if envio.get("type") == "planilla_eventuales":
+                    continue
                 with st.expander(f"📅 Periodo: {envio['periodo']} — Entregado el {envio['fecha']}"):
                     if envio.get('notes'):
                         st.markdown("##### 📝 Tus Notas / Aclaraciones Enviadas")
@@ -706,131 +807,148 @@ def client_dashboard():
                             "Líquido a Pagar": liquido
                         })
                     
-                    df_planilla = pd.DataFrame(planilla_data)
-                    
+                    st.session_state["temp_planilla_eventuales"] = {
+                        "periodo": periodo_str,
+                        "data": planilla_data,
+                        "total_bruto": total_bruto,
+                        "total_retencion": total_retencion,
+                        "total_liquido": total_liquido
+                    }
                     st.success(f"¡Planilla de Eventuales para el periodo **{periodo_str}** calculada exitosamente!")
-                    
-                    st.markdown("##### 📊 Resumen Consolidado de la Planilla")
-                    col_m1, col_m2, col_m3 = st.columns(3)
-                    col_m1.metric("Total Bruto", f"${total_bruto:,.2f}")
-                    col_m2.metric("Total Retención 10%", f"${total_retencion:,.2f}")
-                    col_m3.metric("Total Líquido a Pagar", f"${total_liquido:,.2f}")
-                    
-                    st.markdown("##### 📋 Detalle de la Planilla")
-                    st.dataframe(
-                        df_planilla.style.format({
-                            "Monto Bruto": "${:,.2f}",
-                            "Retención 10%": "${:,.2f}",
-                            "Líquido a Pagar": "${:,.2f}"
-                        }),
-                        use_container_width=True
-                    )
-                    
-                    # Generación de Excel con formato profesional, periodo y totales generales
-                    output = io.BytesIO()
-                    
-                    total_row_df = pd.DataFrame([{
-                        "Prestador Eventual": "TOTALES GENERALES",
-                        "DUI": "",
-                        "Monto Bruto": total_bruto,
-                        "Retención 10%": total_retencion,
-                        "Líquido a Pagar": total_liquido
-                    }])
-                    df_export = pd.concat([df_planilla, total_row_df], ignore_index=True)
-                    
-                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        df_export.to_excel(writer, index=False, sheet_name='Planilla Eventuales', startrow=4)
-                        workbook = writer.book
-                        worksheet = writer.sheets['Planilla Eventuales']
+                
+                if "temp_planilla_eventuales" in st.session_state:
+                    p_info = st.session_state["temp_planilla_eventuales"]
+                    if p_info["periodo"] == periodo_str:
+                        df_planilla = pd.DataFrame(p_info["data"])
+                        total_bruto = p_info["total_bruto"]
+                        total_retencion = p_info["total_retencion"]
+                        total_liquido = p_info["total_liquido"]
                         
-                        # Metadatos superiores (Nombre de la planilla y periodo de referencia)
-                        worksheet['A1'] = "RI CONSULTORES — PLANILLA DE RETENCIÓN DE RENTA (10% EVENTUALES)"
-                        worksheet['A2'] = f"Periodo Fiscal / Mes de Referencia: {periodo_str}"
-                        worksheet['A3'] = f"Cliente / Contribuyente: {st.session_state.username}"
+                        st.markdown("##### 📊 Resumen Consolidado de la Planilla")
+                        col_m1, col_m2, col_m3 = st.columns(3)
+                        col_m1.metric("Total Bruto", f"${total_bruto:,.2f}")
+                        col_m2.metric("Total Retención 10%", f"${total_retencion:,.2f}")
+                        col_m3.metric("Total Líquido a Pagar", f"${total_liquido:,.2f}")
                         
-                        # Estilos profesionales
-                        title_font = Font(name='Calibri', size=12, bold=True, color='1F4E78')
-                        subtitle_font = Font(name='Calibri', size=10, bold=True, color='595959')
-                        header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
-                        header_fill = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')
-                        
-                        total_font = Font(name='Calibri', size=11, bold=True, color='000000')
-                        total_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
-                        
-                        align_center = Alignment(horizontal='center', vertical='center')
-                        align_right = Alignment(horizontal='right', vertical='center')
-                        align_left = Alignment(horizontal='left', vertical='center')
-                        
-                        thin_border = Border(
-                            left=Side(style='thin', color='D3D3D3'),
-                            right=Side(style='thin', color='D3D3D3'),
-                            top=Side(style='thin', color='D3D3D3'),
-                            bottom=Side(style='thin', color='D3D3D3')
-                        )
-                        thick_bottom_border = Border(
-                            left=Side(style='thin', color='D3D3D3'),
-                            right=Side(style='thin', color='D3D3D3'),
-                            top=Side(style='thin', color='D3D3D3'),
-                            bottom=Side(style='double', color='000000')
+                        st.markdown("##### 📋 Detalle de la Planilla")
+                        st.dataframe(
+                            df_planilla.style.format({
+                                "Monto Bruto": "${:,.2f}",
+                                "Retención 10%": "${:,.2f}",
+                                "Líquido a Pagar": "${:,.2f}"
+                            }),
+                            use_container_width=True
                         )
                         
-                        worksheet['A1'].font = title_font
-                        worksheet['A2'].font = subtitle_font
-                        worksheet['A3'].font = subtitle_font
+                        # Generación de Excel con formato profesional, periodo y totales generales
+                        output = io.BytesIO()
+                        total_row_df = pd.DataFrame([{
+                            "Prestador Eventual": "TOTALES GENERALES",
+                            "DUI": "",
+                            "Monto Bruto": total_bruto,
+                            "Retención 10%": total_retencion,
+                            "Líquido a Pagar": total_liquido
+                        }])
+                        df_export = pd.concat([df_planilla, total_row_df], ignore_index=True)
                         
-                        # Fila 5: Encabezados de la tabla (startrow=4)
-                        header_row_idx = 5
-                        for col_num in range(1, len(df_export.columns) + 1):
-                            cell = worksheet.cell(row=header_row_idx, column=col_num)
-                            cell.font = header_font
-                            cell.fill = header_fill
-                            cell.alignment = align_center
-                            cell.border = thin_border
+                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                            df_export.to_excel(writer, index=False, sheet_name='Planilla Eventuales', startrow=4)
+                            workbook = writer.book
+                            worksheet = writer.sheets['Planilla Eventuales']
                             
-                        # Aplicar formato a celdas de datos y fila de totales
-                        total_row_idx = header_row_idx + len(df_export)
-                        for row_idx in range(header_row_idx + 1, total_row_idx + 1):
-                            is_total_row = (row_idx == total_row_idx)
-                            for col_idx in range(1, len(df_export.columns) + 1):
-                                cell = worksheet.cell(row=row_idx, column=col_idx)
-                                if is_total_row:
-                                    cell.font = total_font
-                                    cell.fill = total_fill
-                                    cell.border = thick_bottom_border
-                                else:
-                                    cell.border = thin_border
-                                    
-                                if col_idx in [3, 4, 5]: # Monto Bruto, Retención, Líquido
-                                    cell.number_format = '$#,##0.00'
-                                    cell.alignment = align_right
-                                elif col_idx == 2: # DUI
-                                    cell.alignment = align_center
-                                else:
-                                    cell.alignment = align_left
-                                    
-                        # Auto-ajuste de ancho de columnas
-                        for col in worksheet.columns:
-                            max_len = 0
-                            for cell in col:
-                                if cell.row >= 5:
-                                    val_str = str(cell.value or '')
-                                    if len(val_str) > max_len:
-                                        max_len = len(val_str)
-                            col_letter = get_column_letter(col[0].column)
-                            worksheet.column_dimensions[col_letter].width = max(max_len + 4, 18)
+                            worksheet['A1'] = "RI CONSULTORES — PLANILLA DE RETENCIÓN DE RENTA (10% EVENTUALES)"
+                            worksheet['A2'] = f"Periodo Fiscal / Mes de Referencia: {periodo_str}"
+                            worksheet['A3'] = f"Cliente / Contribuyente: {st.session_state.username}"
                             
-                    excel_data = output.getvalue()
-                    
-                    safe_client_name = st.session_state.username.replace(" ", "_").replace(".", "")
-                    file_name_download = f"Planilla_Eventuales_10_{safe_client_name}_{periodo_str.replace(' ', '_')}.xlsx"
-                    
-                    st.download_button(
-                        label="📥 Descargar Planilla de Eventuales en Excel (Formato Profesional)",
-                        data=excel_data,
-                        file_name=file_name_download,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
+                            title_font = Font(name='Calibri', size=12, bold=True, color='1F4E78')
+                            subtitle_font = Font(name='Calibri', size=10, bold=True, color='595959')
+                            header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
+                            header_fill = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')
+                            total_font = Font(name='Calibri', size=11, bold=True, color='000000')
+                            total_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
+                            
+                            align_center = Alignment(horizontal='center', vertical='center')
+                            align_right = Alignment(horizontal='right', vertical='center')
+                            align_left = Alignment(horizontal='left', vertical='center')
+                            
+                            thin_border = Border(
+                                left=Side(style='thin', color='D3D3D3'), right=Side(style='thin', color='D3D3D3'),
+                                top=Side(style='thin', color='D3D3D3'), bottom=Side(style='thin', color='D3D3D3')
+                            )
+                            thick_bottom_border = Border(
+                                left=Side(style='thin', color='D3D3D3'), right=Side(style='thin', color='D3D3D3'),
+                                top=Side(style='thin', color='D3D3D3'), bottom=Side(style='double', color='000000')
+                            )
+                            
+                            worksheet['A1'].font = title_font
+                            worksheet['A2'].font = subtitle_font
+                            worksheet['A3'].font = subtitle_font
+                            
+                            header_row_idx = 5
+                            for col_num in range(1, len(df_export.columns) + 1):
+                                cell = worksheet.cell(row=header_row_idx, column=col_num)
+                                cell.font = header_font
+                                cell.fill = header_fill
+                                cell.alignment = align_center
+                                cell.border = thin_border
+                                
+                            total_row_idx = header_row_idx + len(df_export)
+                            for row_idx in range(header_row_idx + 1, total_row_idx + 1):
+                                is_total_row = (row_idx == total_row_idx)
+                                for col_idx in range(1, len(df_export.columns) + 1):
+                                    cell = worksheet.cell(row=row_idx, column=col_idx)
+                                    if is_total_row:
+                                        cell.font = total_font
+                                        cell.fill = total_fill
+                                        cell.border = thick_bottom_border
+                                    else:
+                                        cell.border = thin_border
+                                        
+                                    if col_idx in [3, 4, 5]:
+                                        cell.number_format = '$#,##0.00'
+                                        cell.alignment = align_right
+                                    elif col_idx == 2:
+                                        cell.alignment = align_center
+                                    else:
+                                        cell.alignment = align_left
+                                        
+                            for col in worksheet.columns:
+                                max_len = 0
+                                for cell in col:
+                                    if cell.row >= 5:
+                                        val_str = str(cell.value or '')
+                                        if len(val_str) > max_len:
+                                            max_len = len(val_str)
+                                col_letter = get_column_letter(col[0].column)
+                                worksheet.column_dimensions[col_letter].width = max(max_len + 4, 18)
+                                
+                        excel_data = output.getvalue()
+                        safe_client_name = st.session_state.username.replace(" ", "_").replace(".", "")
+                        file_name_download = f"Planilla_Eventuales_10_{safe_client_name}_{periodo_str.replace(' ', '_')}.xlsx"
+                        
+                        st.download_button(
+                            label="📥 Descargar Planilla de Eventuales en Excel (Formato Profesional)",
+                            data=excel_data,
+                            file_name=file_name_download,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+                        
+                        st.divider()
+                        if st.button("📤 Enviar Planilla Oficial de Eventuales a RI Consultores", use_container_width=True, type="primary"):
+                            planilla_submission_record = {
+                                "user_id": current_user_id,
+                                "client": st.session_state.username,
+                                "periodo": periodo_str,
+                                "type": "planilla_eventuales",
+                                "data": p_info["data"],
+                                "total_bruto": total_bruto,
+                                "total_retencion": total_retencion,
+                                "total_liquido": total_liquido,
+                                "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+                            }
+                            save_submission_to_disk(planilla_submission_record)
+                            st.success(f"¡Planilla de eventuales del periodo {periodo_str} enviada exitosamente al administrador!")
             else:
                 st.warning("⚠️ No hay prestadores eventuales registrados en el sistema. Por favor cargue al menos uno en la pestaña 'Cargar Eventual'.")
 
