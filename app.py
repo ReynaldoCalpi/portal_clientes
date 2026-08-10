@@ -594,7 +594,7 @@ def client_dashboard():
         if current_user_id not in st.session_state.eventuales_db:
             st.session_state.eventuales_db[current_user_id] = []
             
-        ev_tab_add, ev_tab_manage, ev_tab_calc = st.tabs(["➕ Cargar Eventual", "✏️ Editar / Borrar Eventuales", "🧮 Cálculo de Retención 10%"])
+        ev_tab_add, ev_tab_manage, ev_tab_calc = st.tabs(["➕ Cargar Eventual", "✏️ Editar / Borrar Eventuales", "🧮 Calcular Todos y Crear Planilla"])
         
         with ev_tab_add:
             with st.form("form_add_eventual"):
@@ -647,36 +647,92 @@ def client_dashboard():
                 st.info("No hay prestadores eventuales cargados en el sistema todavía.")
                 
         with ev_tab_calc:
-            with st.form("form_eventuales_10"):
-                evs = st.session_state.eventuales_db.get(current_user_id, [])
-                ev_names = [e["nombre"] for e in evs] if evs else []
-                
-                if ev_names:
-                    selected_ev_name = st.selectbox("Seleccionar Prestador Eventual Registrado", ev_names)
-                    selected_ev_obj = next((e for e in evs if e["nombre"] == selected_ev_name), {"dui": "", "monto": 0.0})
-                    default_ev_dui = selected_ev_obj["dui"]
-                    default_ev_monto = selected_ev_obj["monto"]
-                else:
-                    selected_ev_name = st.text_input("Nombre del Prestador de Servicios")
-                    default_ev_dui = st.text_input("DUI del Prestador de Servicios (ej. 00000000-0)", key="manual_ev_dui")
-                    default_ev_monto = 0.0
+            st.subheader("🧮 Cálculo Masivo y Planilla de Retención (10% Eventuales)")
+            st.info("ℹ️ Este módulo calcula de forma simultánea la retención de renta del 10% para **todos** los prestadores eventuales registrados, generando la planilla consolidada del periodo.")
+            
+            evs = st.session_state.eventuales_db.get(current_user_id, [])
+            
+            if evs:
+                with st.form("form_calc_all_eventuales"):
+                    st.markdown("##### Verifique o ajuste los montos brutos para la planilla actual:")
                     
-                ev_monto = st.number_input("Monto Bruto de la Factura / Periodo ($)", min_value=0.0, value=default_ev_monto, step=10.0, key="ev_monto_calc")
-                
-                btn_ev = st.form_submit_button("Calcular Retención del 10%", use_container_width=True)
-                if btn_ev:
-                    retencion_10 = ev_monto * 0.10
-                    liquido_pagar = ev_monto - retencion_10
+                    updated_evs_data = []
+                    for idx, ev in enumerate(evs):
+                        col_n, col_d, col_m = st.columns([2, 1, 1])
+                        with col_n:
+                            st.text(ev['nombre'])
+                        with col_d:
+                            st.text(ev['dui'] or 'Sin DUI')
+                        with col_m:
+                            monto_val = st.number_input(
+                                f"Monto ($) - {ev['nombre']}", 
+                                min_value=0.0, 
+                                value=float(ev['monto']), 
+                                step=10.0, 
+                                key=f"calc_all_monto_{idx}",
+                                label_visibility="collapsed"
+                            )
+                        updated_evs_data.append({
+                            "nombre": ev['nombre'],
+                            "dui": ev['dui'],
+                            "monto": monto_val
+                        })
                     
-                    target_name = selected_ev_name if ev_names else (selected_ev_name or 'General')
-                    target_dui = default_ev_dui if (ev_names and 'default_ev_dui' in locals()) else (ev_dui if 'ev_dui' in locals() else '')
-                    dui_text = f" - DUI: {target_dui}" if target_dui else ""
+                    btn_calc_all = st.form_submit_button("🚀 Calcular Todos y Crear Planilla", use_container_width=True)
                     
-                    st.success(f"Cálculo Mensual para Eventual: **{target_name}**{dui_text}")
-                    col_e1, col_e2, col_e3 = st.columns(3)
-                    col_e1.metric("Monto Bruto", f"${ev_monto:,.2f}")
-                    col_e2.metric("Retención de Renta (10%)", f"${retencion_10:,.2f}")
-                    col_e3.metric("Líquido a Pagar", f"${liquido_pagar:,.2f}")
+                if btn_calc_all:
+                    planilla_data = []
+                    total_bruto = 0.0
+                    total_retencion = 0.0
+                    total_liquido = 0.0
+                    
+                    for item in updated_evs_data:
+                        bruto = item['monto']
+                        retencion = bruto * 0.10
+                        liquido = bruto - retencion
+                        
+                        total_bruto += bruto
+                        total_retencion += retencion
+                        total_liquido += liquido
+                        
+                        planilla_data.append({
+                            "Prestador Eventual": item['nombre'],
+                            "DUI": item['dui'] or "N/A",
+                            "Monto Bruto": bruto,
+                            "Retención 10%": retencion,
+                            "Líquido a Pagar": liquido
+                        })
+                    
+                    df_planilla = pd.DataFrame(planilla_data)
+                    
+                    st.success("¡Planilla de Eventuales calculada exitosamente!")
+                    
+                    st.markdown("##### 📊 Resumen Consolidado de la Planilla")
+                    col_m1, col_m2, col_m3 = st.columns(3)
+                    col_m1.metric("Total Bruto", f"${total_bruto:,.2f}")
+                    col_m2.metric("Total Retención 10%", f"${total_retencion:,.2f}")
+                    col_m3.metric("Total Líquido a Pagar", f"${total_liquido:,.2f}")
+                    
+                    st.markdown("##### 📋 Detalle de la Planilla")
+                    st.dataframe(
+                        df_planilla.style.format({
+                            "Monto Bruto": "${:,.2f}",
+                            "Retención 10%": "${:,.2f}",
+                            "Líquido a Pagar": "${:,.2f}"
+                        }),
+                        use_container_width=True
+                    )
+                    
+                    csv_data = df_planilla.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="📥 Descargar Planilla de Eventuales (CSV)",
+                        data=csv_data,
+                        file_name=f"Planilla_Eventuales_10_{periodo_str.replace(' ', '_')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+            else:
+                st.warning("⚠️ No hay prestadores eventuales registrados en el sistema. Por favor cargue al menos uno en la pestaña 'Cargar Eventual'.")
 
 # --- Control de Sesión ---
 if not st.session_state.logged_in:
