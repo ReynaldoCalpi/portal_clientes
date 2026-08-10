@@ -198,6 +198,8 @@ if "user_id" not in st.session_state:
 
 if "clients_db" not in st.session_state:
     st.session_state.clients_db = {}
+if "employees_db" not in st.session_state:
+    st.session_state.employees_db = {}
 
 # --- Sincronización de Clientes Oficiales ---
 official_clients = {
@@ -436,16 +438,79 @@ def client_dashboard():
 
     with client_tab2:
         st.subheader("💼 MANTENIMIENTO DE PERSONAL Y PLANILLA QUINCENAL")
-        with st.form("form_planilla_quincenal"):
-            q_empleado = st.text_input("Nombre del Empleado Quincenal")
-            q_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, step=10.0, key="q_sal")
-            q_bono = st.number_input("Bonificaciones / Otros Ingresos ($)", min_value=0.0, step=5.0, key="q_bono")
+        
+        if current_user_id not in st.session_state.employees_db:
+            st.session_state.employees_db[current_user_id] = []
             
-            btn_q = st.form_submit_button("Calcular Quincena", use_container_width=True)
-            if btn_q:
-                base_quincenal = (q_salario / 2.0) + q_bono
-                st.success(f"Resultado para {q_empleado or 'Empleado'} ({quincena_op}):")
-                st.metric("Total Devengado Quincenal", f"${base_quincenal:,.2f}")
+        emp_tab_add, emp_tab_manage, emp_tab_calc = st.tabs(["➕ Cargar Empleado", "✏️ Editar / Borrar Empleados", "🧮 Cálculo de Planilla"])
+        
+        with emp_tab_add:
+            with st.form("form_add_employee"):
+                new_emp_name = st.text_input("Nombre Completo del Empleado")
+                new_emp_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, step=10.0, key="add_emp_sal")
+                submit_add_emp = st.form_submit_button("Cargar Empleado al Sistema", use_container_width=True)
+                
+                if submit_add_emp:
+                    if new_emp_name.strip():
+                        st.session_state.employees_db[current_user_id].append({
+                            "nombre": new_emp_name.strip(),
+                            "salario": new_emp_salario
+                        })
+                        st.success(f"¡Empleado **{new_emp_name.strip()}** cargado al sistema exitosamente!")
+                    else:
+                        st.warning("Por favor ingresa el nombre del empleado.")
+                        
+        with emp_tab_manage:
+            st.subheader("Listado de Personal Registrado")
+            emps = st.session_state.employees_db.get(current_user_id, [])
+            if emps:
+                for idx, emp in enumerate(emps):
+                    with st.expander(f"👤 {emp['nombre']} — Salario Base: ${emp['salario']:,.2f}"):
+                        with st.form(f"edit_delete_emp_{idx}"):
+                            ed_name = st.text_input("Editar Nombre", value=emp['nombre'], key=f"ed_name_{idx}")
+                            ed_salario = st.number_input("Editar Salario Base Mensual ($)", min_value=0.0, step=10.0, value=float(emp['salario']), key=f"ed_sal_{idx}")
+                            
+                            col_btn1, col_btn2 = st.columns(2)
+                            update_btn = col_btn1.form_submit_button("💾 Guardar Cambios", use_container_width=True)
+                            delete_btn = col_btn2.form_submit_button("🗑️ Borrar Empleado", use_container_width=True)
+                            
+                            if update_btn:
+                                st.session_state.employees_db[current_user_id][idx] = {
+                                    "nombre": ed_name.strip(),
+                                    "salario": ed_salario
+                                }
+                                st.success("¡Empleado actualizado correctamente!")
+                                st.rerun()
+                                
+                            if delete_btn:
+                                st.session_state.employees_db[current_user_id].pop(idx)
+                                st.success("¡Empleado eliminado del sistema!")
+                                st.rerun()
+            else:
+                st.info("No hay empleados cargados en el sistema todavía.")
+                
+        with emp_tab_calc:
+            with st.form("form_planilla_quincenal"):
+                emps = st.session_state.employees_db.get(current_user_id, [])
+                emp_names = [e["nombre"] for e in emps] if emps else []
+                
+                if emp_names:
+                    selected_emp_name = st.selectbox("Seleccionar Empleado Registrado", emp_names)
+                    selected_emp_obj = next((e for e in emps if e["nombre"] == selected_emp_name), {"salario": 0.0})
+                    default_sal = selected_emp_obj["salario"]
+                else:
+                    selected_emp_name = st.text_input("Nombre del Empleado Quincenal")
+                    default_sal = 0.0
+                    
+                q_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, value=default_sal, step=10.0, key="q_sal")
+                q_bono = st.number_input("Bonificaciones / Otros Ingresos ($)", min_value=0.0, step=5.0, key="q_bono")
+                
+                btn_q = st.form_submit_button("Calcular Quincena", use_container_width=True)
+                if btn_q:
+                    base_quincenal = (q_salario / 2.0) + q_bono
+                    target_name = selected_emp_name if emp_names else (selected_emp_name or 'Empleado')
+                    st.success(f"Resultado para {target_name} ({quincena_op}):")
+                    st.metric("Total Devengado Quincenal", f"${base_quincenal:,.2f}")
 
     with client_tab3:
         st.subheader("📊 Historial de Declaraciones, Resumen Ejecutivo de IVA y Trazabilidad DTE")
