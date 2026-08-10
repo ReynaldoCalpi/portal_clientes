@@ -557,12 +557,10 @@ def client_dashboard():
     with client_tab2:
         st.subheader("💼 MANTENIMIENTO DE PERSONAL Y PLANILLA QUINCENAL")
         
-        if current_user_id not in st.session_state.employees_db:
-            # Asegurar de forma estricta que el diccionario exista y no sea None
-        if "employees_db" not in st.session_state or st.session_state.employees_db is None or not isinstance(st.session_state.employees_db, dict):
+        if "employees_db" not in st.session_state or not isinstance(st.session_state.get("employees_db"), dict):
         st.session_state.employees_db = {}
-        
-        if current_user_id not in st.session_state.employees_db or not isinstance(st.session_state.employees_db.get(current_user_id), list):
+
+    if current_user_id not in st.session_state.employees_db or not isinstance(st.session_state.employees_db.get(current_user_id), list):
         st.session_state.employees_db[current_user_id] = []
             
         emp_tab_add, emp_tab_manage, emp_tab_calc = st.tabs(["➕ Cargar Empleado", "✏️ Editar / Borrar Empleados", "🧮 Cálculo de Planilla"])
