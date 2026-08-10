@@ -200,6 +200,8 @@ if "clients_db" not in st.session_state:
     st.session_state.clients_db = {}
 if "employees_db" not in st.session_state:
     st.session_state.employees_db = {}
+if "eventuales_db" not in st.session_state:
+    st.session_state.eventuales_db = {}
 
 # --- Sincronización de Clientes Oficiales ---
 official_clients = {
@@ -587,25 +589,94 @@ def client_dashboard():
             st.warning("⚠️ Aún no has registrado envíos de documentos en el portal.")
 
     with client_tab4:
-        st.subheader("🧾 Cálculos Mensuales para Eventuales (10% de Retención)")
-        st.info("ℹ️ Este módulo calcula de forma automática el monto bruto, aplica la retención fiscal del 10% correspondiente a servicios eventuales u honorarios y determina el líquido a pagar.")
+        st.subheader("🧾 MANTENIMIENTO DE EVENTUALES Y CÁLCULO DE 10%")
         
-        with st.form("form_eventuales_10"):
-            ev_nombre = st.text_input("Nombre del Personal Eventual / Prestador de Servicios")
-            ev_dui = st.text_input("DUI del Prestador de Servicios (ej. 00000000-0)")
-            ev_monto = st.number_input("Monto Bruto Acumulado del Mes / Factura ($)", min_value=0.0, step=10.0, key="ev_monto")
+        if current_user_id not in st.session_state.eventuales_db:
+            st.session_state.eventuales_db[current_user_id] = []
             
-            btn_ev = st.form_submit_button("Calcular Retención del 10%", use_container_width=True)
-            if btn_ev:
-                retencion_10 = ev_monto * 0.10
-                liquido_pagar = ev_monto - retencion_10
+        ev_tab_add, ev_tab_manage, ev_tab_calc = st.tabs(["➕ Cargar Eventual", "✏️ Editar / Borrar Eventuales", "🧮 Cálculo de Retención 10%"])
+        
+        with ev_tab_add:
+            with st.form("form_add_eventual"):
+                new_ev_name = st.text_input("Nombre Completo del Prestador de Servicios")
+                new_ev_dui = st.text_input("DUI del Prestador de Servicios (ej. 00000000-0)")
+                new_ev_monto = st.number_input("Monto Bruto Habitual ($)", min_value=0.0, step=10.0, key="add_ev_monto")
+                submit_add_ev = st.form_submit_button("Cargar Eventual al Sistema", use_container_width=True)
                 
-                dui_text = f" - DUI: {ev_dui}" if ev_dui else ""
-                st.success(f"Cálculo Mensual para Eventual: **{ev_nombre or 'General'}**{dui_text}")
-                col_e1, col_e2, col_e3 = st.columns(3)
-                col_e1.metric("Monto Bruto", f"${ev_monto:,.2f}")
-                col_e2.metric("Retención de Renta (10%)", f"${retencion_10:,.2f}")
-                col_e3.metric("Líquido a Pagar", f"${liquido_pagar:,.2f}")
+                if submit_add_ev:
+                    if new_ev_name.strip():
+                        st.session_state.eventuales_db[current_user_id].append({
+                            "nombre": new_ev_name.strip(),
+                            "dui": new_ev_dui.strip(),
+                            "monto": new_ev_monto
+                        })
+                        st.success(f"¡Prestador eventual **{new_ev_name.strip()}** cargado al sistema exitosamente!")
+                    else:
+                        st.warning("Por favor ingresa el nombre del prestador eventual.")
+                        
+        with ev_tab_manage:
+            st.subheader("Listado de Personal Eventual Registrado")
+            evs = st.session_state.eventuales_db.get(current_user_id, [])
+            if evs:
+                for idx, ev in enumerate(evs):
+                    dui_str = f" - DUI: {ev['dui']}" if ev['dui'] else ""
+                    with st.expander(f"👤 {ev['nombre']}{dui_str} — Monto Bruto Habitual: ${ev['monto']:,.2f}"):
+                        with st.form(f"edit_delete_ev_{idx}"):
+                            ed_ev_name = st.text_input("Editar Nombre", value=ev['nombre'], key=f"ed_ev_name_{idx}")
+                            ed_ev_dui = st.text_input("Editar DUI", value=ev['dui'], key=f"ed_ev_dui_{idx}")
+                            ed_ev_monto = st.number_input("Editar Monto Bruto Habitual ($)", min_value=0.0, step=10.0, value=float(ev['monto']), key=f"ed_ev_mon_{idx}")
+                            
+                            col_btn1, col_btn2 = st.columns(2)
+                            update_ev_btn = col_btn1.form_submit_button("💾 Guardar Cambios", use_container_width=True)
+                            delete_ev_btn = col_btn2.form_submit_button("🗑️ Borrar Eventual", use_container_width=True)
+                            
+                            if update_ev_btn:
+                                st.session_state.eventuales_db[current_user_id][idx] = {
+                                    "nombre": ed_ev_name.strip(),
+                                    "dui": ed_ev_dui.strip(),
+                                    "monto": ed_ev_monto
+                                }
+                                st.success("¡Prestador eventual actualizado correctamente!")
+                                st.rerun()
+                                
+                            if delete_ev_btn:
+                                st.session_state.eventuales_db[current_user_id].pop(idx)
+                                st.success("¡Prestador eventual eliminado del sistema!")
+                                st.rerun()
+            else:
+                st.info("No hay prestadores eventuales cargados en el sistema todavía.")
+                
+        with ev_tab_calc:
+            with st.form("form_eventuales_10"):
+                evs = st.session_state.eventuales_db.get(current_user_id, [])
+                ev_names = [e["nombre"] for e in evs] if evs else []
+                
+                if ev_names:
+                    selected_ev_name = st.selectbox("Seleccionar Prestador Eventual Registrado", ev_names)
+                    selected_ev_obj = next((e for e in evs if e["nombre"] == selected_ev_name), {"dui": "", "monto": 0.0})
+                    default_ev_dui = selected_ev_obj["dui"]
+                    default_ev_monto = selected_ev_obj["monto"]
+                else:
+                    selected_ev_name = st.text_input("Nombre del Prestador de Servicios")
+                    default_ev_dui = st.text_input("DUI del Prestador de Servicios (ej. 00000000-0)", key="manual_ev_dui")
+                    default_ev_monto = 0.0
+                    
+                ev_monto = st.number_input("Monto Bruto de la Factura / Periodo ($)", min_value=0.0, value=default_ev_monto, step=10.0, key="ev_monto_calc")
+                
+                btn_ev = st.form_submit_button("Calcular Retención del 10%", use_container_width=True)
+                if btn_ev:
+                    retencion_10 = ev_monto * 0.10
+                    liquido_pagar = ev_monto - retencion_10
+                    
+                    target_name = selected_ev_name if ev_names else (selected_ev_name or 'General')
+                    target_dui = default_ev_dui if (ev_names and 'default_ev_dui' in locals()) else (ev_dui if 'ev_dui' in locals() else '')
+                    dui_text = f" - DUI: {target_dui}" if target_dui else ""
+                    
+                    st.success(f"Cálculo Mensual para Eventual: **{target_name}**{dui_text}")
+                    col_e1, col_e2, col_e3 = st.columns(3)
+                    col_e1.metric("Monto Bruto", f"${ev_monto:,.2f}")
+                    col_e2.metric("Retención de Renta (10%)", f"${retencion_10:,.2f}")
+                    col_e3.metric("Líquido a Pagar", f"${liquido_pagar:,.2f}")
 
 # --- Control de Sesión ---
 if not st.session_state.logged_in:
