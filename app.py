@@ -246,7 +246,7 @@ def admin_dashboard():
     st.title("🎛️ Panel de Control - Administrador")
     st.markdown("Supervisa el cumplimiento fiscal, administra cuentas y revisa los documentos cargados en tiempo real.")
     
-    tab1, tab2, tab3 = st.tabs(["📋 Estatus y Archivos Recibidos", "➕ Crear Nuevo Usuario", "👥 Listado de Cuentas"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 Estatus y Archivos Recibidos", "➕ Crear Nuevo Usuario", "👥 Listado de Cuentas", "🧮 Cálculo de Planillas"])
     
     with tab1:
         st.subheader("Control de Recepción y Descarga de Documentos")
@@ -266,7 +266,6 @@ def admin_dashboard():
             for idx, envio in enumerate(envios_periodo):
                 with st.expander(f"📁 {envio['client']} — Entregado el {envio['fecha']}"):
                     
-                    # --- Despliegue de Notas Aclaratorias del Cliente para el Admin ---
                     if envio.get('notes'):
                         st.info(f"**📝 Notas / Aclaraciones del Cliente:**\n\n{envio['notes']}")
                     
@@ -335,6 +334,39 @@ def admin_dashboard():
             st.dataframe(pd.DataFrame(client_accounts), use_container_width=True)
         else:
             st.warning("No hay clientes registrados.")
+
+    with tab4:
+        st.subheader("🧮 Módulo de Cálculo de Planillas")
+        tipo_calculo = st.radio(
+            "Seleccione la modalidad de cálculo:",
+            ["Quincenal (Estándar)", "Mensual para Eventuales"],
+            horizontal=True
+        )
+        
+        with st.form("form_calculo_planilla"):
+            col_p1, col_p2 = st.columns(2)
+            with col_p1:
+                empleado_nombre = st.text_input("Nombre del Empleado / Eventual")
+                monto_base = st.number_input("Monto / Salario Base ($)", min_value=0.0, step=10.0)
+            with col_p2:
+                if tipo_calculo == "Mensual para Eventuales":
+                    st.info("ℹ️ Cálculo mensual aplicado a personal eventual (acumulado o pago único mensual).")
+                    factor_divisor = 1.0
+                else:
+                    st.info("ℹ️ Cálculo estándar dividido por quincena (2 pagos por mes).")
+                    factor_divisor = 2.0
+                
+                bonificacion = st.number_input("Bonificaciones / Extras ($)", min_value=0.0, step=5.0)
+                
+            calcular_btn = st.form_submit_button("Calcular Planilla", use_container_width=True)
+            
+            if calcular_btn:
+                total_percepcion = (monto_base / factor_divisor) + bonificacion if factor_divisor > 2.0 or tipo_calculo == "Mensual para Eventuales" else (monto_base / factor_divisor) + bonificacion
+                if tipo_calculo == "Mensual para Eventuales":
+                    total_percepcion = monto_base + bonificacion
+                
+                st.success(f"Resultado del cálculo ({tipo_calculo}):")
+                st.metric(label="Total a Pagar", value=f"${total_percepcion:,.2f}")
 
 # --- Panel del Cliente (Blindado y con Notas Aclaratorias Integradas) ---
 def client_dashboard():
@@ -443,7 +475,6 @@ def client_dashboard():
             for envio in mis_envios:
                 with st.expander(f"📅 Periodo: {envio['periodo']} — Entregado el {envio['fecha']}"):
                     
-                    # --- Mostrar Notas del Cliente en el Historial ---
                     if envio.get('notes'):
                         st.markdown("##### 📝 Tus Notas / Aclaraciones Enviadas")
                         st.info(envio['notes'])
@@ -460,7 +491,6 @@ def client_dashboard():
                     p_iva = df_purch['IVA'].sum() if not df_purch.empty else 0.0
                     p_tot = df_purch['Total'].sum() if not df_purch.empty else 0.0
                     
-                    # --- Resumen Ejecutivo de IVA para el Cliente ---
                     st.markdown("##### 💼 Resumen Ejecutivo de IVA")
                     col_re1, col_re2, col_re3 = st.columns(3)
                     col_re1.metric("Débito Fiscal (IVA Ventas)", f"${v_iva:,.2f}")
@@ -472,7 +502,6 @@ def client_dashboard():
                     else:
                         col_re3.metric("Remanente de IVA a Favor", f"${abs(iva_neto):,.2f}", delta_color="normal")
                     
-                    # --- Sección de Ventas con Trazabilidad (Código de Generación + No. Control) ---
                     st.markdown("---")
                     st.markdown("##### 📈 Detalle de Ventas (Trazabilidad DTE)")
                     if not df_sales.empty:
@@ -492,7 +521,6 @@ def client_dashboard():
                     else:
                         st.text("Sin registros de ventas detallados para este periodo.")
                         
-                    # --- Sección de Compras con Trazabilidad ---
                     st.markdown("---")
                     st.markdown("##### 📉 Detalle de Compras y Gastos (Trazabilidad DTE)")
                     if not df_purch.empty:
