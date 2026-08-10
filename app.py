@@ -8,7 +8,7 @@ import zipfile
 
 # Configuración de la página
 st.set_page_config(
-    page_title="Portal de Contribuyente - RI Consultores",
+    page_title="Portal de Clientes - RI Consultores",
     page_icon="📊",
     layout="wide"
 )
@@ -21,54 +21,36 @@ UPLOAD_DIR = "uploaded_files"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
-# Funciones de utilería para Datos
-def load_json_db(filename):
-    if os.path.exists(filename):
+def load_submissions():
+    if os.path.exists(DB_FILE):
         try:
-            with open(filename, "r", encoding="utf-8") as f:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return []
     return []
 
-def save_json_db(filename, data):
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-
 def save_submission_to_disk(submission_data):
-    submissions = load_json_db(DB_FILE)
+    submissions = load_submissions()
     submissions.append(submission_data)
-    save_json_db(DB_FILE, submissions)
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(submissions, f, ensure_ascii=False, indent=4)
+
+# --- Funciones de Persistencia para Empleados / Planillas ---
+def load_employee_db():
+    if os.path.exists(EMPLOYEES_DB):
+        try:
+            with open(EMPLOYEES_DB, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
 
 def save_employee_record(employee_data):
-    employees = load_json_db(EMPLOYEES_DB)
+    employees = load_employee_db()
     employees.append(employee_data)
-    save_json_db(EMPLOYEES_DB, employees)
-
-def save_files_to_folder(file_list, client_name, periodo_str, category):
-    saved_files_info = []
-    if not file_list: return saved_files_info
-    safe_client = client_name.replace(" ", "_").replace(".", "")
-    safe_periodo = periodo_str.replace(" ", "_")
-    folder_path = os.path.join(UPLOAD_DIR, safe_client, safe_periodo, category)
-    os.makedirs(folder_path, exist_ok=True)
-    for file_obj in file_list:
-        file_path = os.path.join(folder_path, file_obj.name)
-        file_obj.seek(0)
-        with open(file_path, "wb") as f:
-            f.write(file_obj.getbuffer())
-        saved_files_info.append({"name": file_obj.name, "path": file_path})
-    return saved_files_info
-
-def create_zip_buffer(json_list, pdf_list):
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for file_info in (json_list or []):
-            if os.path.exists(file_info['path']): zip_file.write(file_info['path'], arcname=file_info['name'])
-        for file_info in (pdf_list or []):
-            if os.path.exists(file_info['path']): zip_file.write(file_info['path'], arcname=file_info['name'])
-    zip_buffer.seek(0)
-    return zip_buffer.getvalue()
+    with open(EMPLOYEES_DB, "w", encoding="utf-8") as f:
+        json.dump(employees, f, ensure_ascii=False, indent=4)
 
 def calcular_empleado_quincenal(salario_mensual, comisiones, h_diurnas, h_nocturnas, otras_deducciones):
     tarifa_hora = (salario_mensual / 30.0) / 8.0
@@ -88,82 +70,576 @@ def calcular_empleado_quincenal(salario_mensual, comisiones, h_diurnas, h_noctur
     liquido = total_gravable - isss - afp - renta - otras_deducciones
     return total_gravable, isss, afp, renta, liquido
 
-# --- Inicialización de Estados ---
-if "logged_in" not in st.session_state: st.session_state.logged_in = False
-if "user_role" not in st.session_state: st.session_state.user_role = None
-if "username" not in st.session_state: st.session_state.username = ""
-if "user_id" not in st.session_state: st.session_state.user_id = ""
-if "calc_result" not in st.session_state: st.session_state.calc_result = None
+def save_files_to_folder(file_list, client_name, periodo_str, category):
+    saved_files_info = []
+    if not file_list:
+        return saved_files_info
+        
+    safe_client = client_name.replace(" ", "_").replace(".", "")
+    safe_periodo = periodo_str.replace(" ", "_")
+    folder_path = os.path.join(UPLOAD_DIR, safe_client, safe_periodo, category)
+    os.makedirs(folder_path, exist_ok=True)
+    
+    for file_obj in file_list:
+        file_path = os.path.join(folder_path, file_obj.name)
+        file_obj.seek(0)
+        with open(file_path, "wb") as f:
+            f.write(file_obj.getbuffer())
+        saved_files_info.append({
+            "name": file_obj.name,
+            "path": file_path
+        })
+    return saved_files_info
+
+def create_zip_buffer(json_list, pdf_list):
+    """Crea un archivo ZIP en memoria con los JSONs y PDFs proporcionados."""
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for file_info in (json_list or []):
+            if os.path.exists(file_info['path']):
+                zip_file.write(file_info['path'], arcname=file_info['name'])
+        for file_info in (pdf_list or []):
+            if os.path.exists(file_info['path']):
+                zip_file.write(file_info['path'], arcname=file_info['name'])
+    zip_buffer.seek(0)
+    return zip_buffer.getvalue()
+
+def extract_invoice_summary(file_list):
+    """Extrae el Código de Generación, Número de Control (DTE-03), valor, iva y total con validación robusta y ecuaciones cruzadas."""
+    summary_data = []
+    if not file_list:
+        return pd.DataFrame()
+    
+    for file_info in file_list:
+        path = file_info.get("path")
+        if path and os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8-sig") as f:
+                    content = json.load(f)
+                
+                items = content if isinstance(content, list) else [content]
+                for item in items:
+                    # Búsqueda estructurada del número de control comenzando con DTE-03
+                    doc_num = None
+                    nc_root = item.get("numeroControl")
+                    if nc_root and str(nc_root).startswith("DTE-03"):
+                        doc_num = nc_root
+                        
+                    ident = item.get("identificacion", {})
+                    if not doc_num and isinstance(ident, dict):
+                        nc_ident = ident.get("numeroControl")
+                        if nc_ident and str(nc_ident).startswith("DTE-03"):
+                            doc_num = nc_ident
+                                
+                    if not doc_num:
+                        doc_num = (
+                            nc_root or 
+                            (ident.get("numeroControl") if isinstance(ident, dict) else None) or
+                            item.get("codigoGeneracion") or 
+                            item.get("numDocumento") or 
+                            file_info["name"]
+                        )
+                    
+                    # Extracción de Código de Generación (UUID) para trazabilidad total
+                    gen_code = None
+                    if isinstance(ident, dict):
+                        gen_code = ident.get("codigoGeneracion")
+                    if not gen_code:
+                        gen_code = item.get("codigoGeneracion") or item.get("selloRecibido") or "N/A"
+                    
+                    resumen = item.get("resumen", {})
+                    if not isinstance(resumen, dict):
+                        resumen = {}
+                    
+                    # Extracción de Valor / Gravada / Subtotal
+                    val = (
+                        resumen.get("totalGravada") or 
+                        resumen.get("subTotal") or 
+                        resumen.get("subTotalVentas") or 
+                        resumen.get("montoTotalOperacion") or 
+                        item.get("totalGravada") or
+                        item.get("subtotal") or 
+                        item.get("valor") or 
+                        0.0
+                    )
+                    
+                    # Extracción de IVA (incluyendo campos directos o búsqueda en matriz de tributos)
+                    iva = (
+                        resumen.get("totalIva") or 
+                        resumen.get("iva") or 
+                        resumen.get("ivaRenta") or 
+                        resumen.get("ivaPerci1") or 
+                        resumen.get("ivaRete1") or 
+                        item.get("totalIva") or 
+                        item.get("iva") or 
+                        0.0
+                    )
+                    
+                    if not iva and "tributos" in resumen and isinstance(resumen["tributos"], list):
+                        iva_tributos = 0.0
+                        for trib in resumen["tributos"]:
+                            if isinstance(trib, dict):
+                                val_trib = trib.get("valor") or trib.get("valTributo") or 0.0
+                                try:
+                                    iva_tributos += float(val_trib)
+                                except:
+                                    pass
+                        if iva_tributos > 0:
+                            iva = iva_tributos
+
+                    # Extracción de Total a Pagar
+                    total = (
+                        resumen.get("totalPagar") or 
+                        resumen.get("montoTotalOperacion") or 
+                        resumen.get("total") or 
+                        item.get("totalPagar") or 
+                        item.get("total") or 
+                        0.0
+                    )
+                    
+                    # Ecuaciones de validación y balance financiero cruzado
+                    try:
+                        val_f = float(val) if val is not None else 0.0
+                        iva_f = float(iva) if iva is not None else 0.0
+                        total_f = float(total) if total is not None else 0.0
+                        
+                        if total_f == 0.0 and val_f > 0.0:
+                            total_f = val_f + iva_f
+                        elif val_f == 0.0 and total_f > 0.0 and iva_f > 0.0:
+                            val_f = total_f - iva_f
+                    except:
+                        val_f, iva_f, total_f = 0.0, 0.0, 0.0
+                        
+                    summary_data.append({
+                        "Código de Generación": str(gen_code),
+                        "Número de Control": str(doc_num),
+                        "Valor": val_f,
+                        "IVA": iva_f,
+                        "Total": total_f
+                    })
+            except Exception:
+                summary_data.append({
+                    "Código de Generación": "N/A",
+                    "Número de Control": file_info["name"],
+                    "Valor": 0.0,
+                    "IVA": 0.0,
+                    "Total": 0.0
+                })
+    return pd.DataFrame(summary_data)
+
+# --- Inicialización de Estados de Sesión ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "user_role" not in st.session_state:
+    st.session_state.user_role = None
+if "username" not in st.session_state:
+    st.session_state.username = ""
+if "user_id" not in st.session_state:
+    st.session_state.user_id = ""
+if "calc_result" not in st.session_state:
+    st.session_state.calc_result = None
+
+if "clients_db" not in st.session_state:
+    st.session_state.clients_db = {}
+
+# --- Sincronización de Clientes Oficiales ---
+official_clients = {
+    "admin": {"password": "admin123", "role": "admin", "name": "Administrador General"},
+    "soluciones_503": {"password": "sol503_2026", "role": "client", "name": "Soluciones 503 S.A.S. de C.V"},
+    "distribuidora_libertad": {"password": "libertad_2026", "role": "client", "name": "Distribuidora Libertad"},
+    "leftech": {"password": "leftech_2026", "role": "client", "name": "Leftech"},
+    "cedillo": {"password": "cedillo_2026", "role": "client", "name": "Cedillo"},
+    "mercadito_rosa": {"password": "rosa_2026", "role": "client", "name": "Mercadito Rosa de Saron AC"}
+}
+
+for k, v in official_clients.items():
+    st.session_state.clients_db[k] = v
 
 # --- Pantalla de Login ---
 def login_screen():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.title("🔐 RI Consultores")
-        clients_db = {
-            "admin": {"password": "admin123", "role": "admin", "name": "Administrador General"},
-            "soluciones_503": {"password": "sol503_2026", "role": "client", "name": "Soluciones 503 S.A.S. de C.V"},
-            "leftech": {"password": "leftech_2026", "role": "client", "name": "Leftech"}
-        }
+        st.markdown("### Portal de Gestión Documental")
+        
         with st.form("login_form"):
             username = st.text_input("Usuario")
             password = st.text_input("Contraseña", type="password")
-            if st.form_submit_button("Iniciar Sesión"):
-                if username in clients_db and clients_db[username]["password"] == password:
+            submit = st.form_submit_button("Iniciar Sesión", use_container_width=True)
+            
+            if submit:
+                user_key = username.strip().lower()
+                if user_key in st.session_state.clients_db and st.session_state.clients_db[user_key]["password"] == password:
                     st.session_state.logged_in = True
-                    st.session_state.user_role = clients_db[username]["role"]
-                    st.session_state.username = clients_db[username]["name"]
-                    st.session_state.user_id = username
+                    st.session_state.user_role = st.session_state.clients_db[user_key]["role"]
+                    st.session_state.username = st.session_state.clients_db[user_key]["name"]
+                    st.session_state.user_id = user_key
                     st.rerun()
+                else:
+                    st.error("Usuario o contraseña incorrectos.")
+
+# --- Panel de Administración ---
+def admin_dashboard():
+    st.title("🎛️ Panel de Control - Administrador")
+    st.markdown("Supervisa el cumplimiento fiscal, administra cuentas y revisa los documentos cargados en tiempo real.")
+    
+    tab1, tab2, tab3 = st.tabs(["📋 Estatus y Archivos Recibidos", "➕ Crear Nuevo Usuario", "👥 Listado de Cuentas"])
+    
+    with tab1:
+        st.subheader("Control de Recepción y Descarga de Documentos")
+        
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            filtro_mes = st.selectbox("Filtrar por Mes", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=5)
+        with col_f2:
+            filtro_anio = st.selectbox("Filtrar por Año", [2026, 2025], index=0)
+            
+        periodo_seleccionado = f"{filtro_mes} {filtro_anio}"
+        all_submissions = load_submissions()
+        envios_periodo = [s for s in all_submissions if s["periodo"] == periodo_seleccionado]
+        
+        if envios_periodo:
+            st.success(f"Se encontraron {len(envios_periodo)} entregas para el periodo {periodo_seleccionado}.")
+            for idx, envio in enumerate(envios_periodo):
+                with st.expander(f"📁 {envio['client']} — Entregado el {envio['fecha']}"):
+                    
+                    if envio.get('notes'):
+                        st.info(f"**📝 Notas / Aclaraciones del Cliente:**\n\n{envio['notes']}")
+                    
+                    col_d1, col_d2 = st.columns(2)
+                    
+                    with col_d1:
+                        st.markdown("**📈 Ventas:**")
+                        has_sales = envio.get('sales_json_list') or envio.get('sales_pdf_list')
+                        if has_sales:
+                            zip_sales_bytes = create_zip_buffer(envio.get('sales_json_list'), envio.get('sales_pdf_list'))
+                            safe_client_name = envio['client'].replace(" ", "_").replace(".", "")
+                            st.download_button(
+                                label="📦 Descargar todas las Ventas (ZIP)",
+                                data=zip_sales_bytes,
+                                file_name=f"Ventas_{safe_client_name}_{envio['periodo'].replace(' ', '_')}.zip",
+                                mime="application/zip",
+                                key=f"zip_sales_{idx}"
+                            )
+                        else:
+                            st.text("Sin archivos de ventas")
+                            
+                    with col_d2:
+                        st.markdown("**📉 Compras y Gastos:**")
+                        has_purch = envio.get('purch_json_list') or envio.get('purch_pdf_list')
+                        if has_purch:
+                            zip_purch_bytes = create_zip_buffer(envio.get('purch_json_list'), envio.get('purch_pdf_list'))
+                            safe_client_name = envio['client'].replace(" ", "_").replace(".", "")
+                            st.download_button(
+                                label="📦 Descargar todas las Compras (ZIP)",
+                                data=zip_purch_bytes,
+                                file_name=f"Compras_{safe_client_name}_{envio['periodo'].replace(' ', '_')}.zip",
+                                mime="application/zip",
+                                key=f"zip_purch_{idx}"
+                            )
+                        else:
+                            st.text("Sin archivos de compras")
+        else:
+            st.info(f"No hay documentos registrados para el periodo {periodo_seleccionado} todavía.")
+
+    with tab2:
+        st.subheader("Dar de alta a un nuevo cliente")
+        with st.form("new_client_form"):
+            new_user_id = st.text_input("Identificador único de usuario (ej. empresa_abc)").strip().lower()
+            company_name = st.text_input("Nombre Comercial / Razón Social")
+            temp_pass = st.text_input("Contraseña Temporal", type="password")
+            create_btn = st.form_submit_button("Registrar Cliente en el Sistema")
+            
+            if create_btn:
+                if new_user_id and company_name and temp_pass:
+                    if new_user_id in st.session_state.clients_db:
+                        st.error("Ese identificador ya existe.")
+                    else:
+                        st.session_state.clients_db[new_user_id] = {
+                            "password": temp_pass,
+                            "role": "client",
+                            "name": company_name
+                        }
+                        st.success(f"¡Cliente **{company_name}** registrado con éxito!")
+                else:
+                    st.warning("Completa todos los campos.")
+
+    with tab3:
+        st.subheader("Cuentas de Clientes Activas")
+        client_accounts = [{"Usuario ID": k, "Nombre": v["name"]} for k, v in st.session_state.clients_db.items() if v["role"] == "client"]
+        if client_accounts:
+            st.dataframe(pd.DataFrame(client_accounts), use_container_width=True)
+        else:
+            st.warning("No hay clientes registrados.")
 
 # --- Panel del Cliente ---
 def client_dashboard():
-    st.title(f"📁 PORTAL — {st.session_state.username}")
-    tab1, tab2 = st.tabs(["CARGA DOCUMENTAL", "GENERADOR PLANILLAS"])
+    st.title(f"📁 Portal de Contribuyente — {st.session_state.username}")
+    st.markdown("Gestión y auditoría de documentos tributarios electrónicos.")
     
-    with tab1:
-        st.write("Panel de Carga") # Simplificado para espacio
-    
-    with tab2:
-        st.subheader("💼 GENERADOR DE PLANILLAS")
-        with st.form("form_planilla"):
-            es_eventual = st.checkbox("Marcar como Eventual (10% fijo)")
-            q_empleado = st.text_input("Nombre del Empleado")
-            q_dui = st.text_input("Número de DUI")
-            q_salario = st.number_input("Salario Base ($)", value=600.0)
-            q_com = st.number_input("Comisiones ($)", value=0.0)
-            h_d = st.number_input("Horas Extras Diurnas", value=0.0)
-            h_n = st.number_input("Horas Extras Nocturnas", value=0.0)
-            
-            if st.form_submit_button("Calcular"):
-                if es_eventual:
-                    tot_grav = q_salario + q_com
-                    renta = tot_grav * 0.10
-                    st.session_state.calc_result = {"Nombre": q_empleado, "DUI": q_dui, "Total": tot_grav, "Renta": renta, "Liquido": tot_grav - renta}
-                else:
-                    t, i, a, r, l = calcular_empleado_quincenal(q_salario, q_com, h_d, h_n, 0.0)
-                    st.session_state.calc_result = {"Nombre": q_empleado, "DUI": q_dui, "Total": t, "Renta": r, "Liquido": l}
+    col_p1, col_p2 = st.columns(2)
+    with col_p1:
+        mes = st.selectbox("Periodo Fiscal - Mes", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=5, key="client_mes")
+    with col_p2:
+        anio = st.selectbox("Periodo Fiscal - Año", [2026, 2025], index=0, key="client_anio")
         
+    periodo_str = f"{mes} {anio}"
+    
+    current_user_id = st.session_state.get("user_id", st.session_state.username)
+    all_submissions = load_submissions()
+    mis_envios = [s for s in all_submissions if s.get("user_id") == current_user_id or s.get("client") == st.session_state.username]
+    envio_actual = next((s for s in mis_envios if s["periodo"] == periodo_str), None)
+    
+    st.markdown("### 📌 Estatus y Acciones Requeridas")
+    if envio_actual:
+        st.success(f"✔️ **Periodo {periodo_str} al día:** Tus documentos han sido recibidos correctamente y se encuentran en proceso de auditoría por RI Consultores.")
+    else:
+        st.warning(f"⚠️ **Acción requerida para {periodo_str}:** Aún no has enviado la información de tus documentos de Ventas y Compras. Por favor cárgalos en la pestaña de abajo.")
+        
+    st.divider()
+    
+    client_tab1, client_tab2, client_tab3 = st.tabs([
+        "📤 Cargar Documentos y Notas", 
+        "📊 Historial, Resumen de IVA y Trazabilidad",
+        "💼 Generador de Planillas"
+    ])
+    
+    with client_tab1:
+        with st.form("upload_form"):
+            col_v, col_c = st.columns(2)
+            
+            with col_v:
+                st.subheader("📈 Ventas")
+                sales_json = st.file_uploader("Arrastra tus JSON de Ventas (Múltiples)", type=["json"], accept_multiple_files=True, key="s_json")
+                sales_pdf = st.file_uploader("Arrastra tus PDFs/ZIP de Ventas (Múltiples)", type=["pdf", "zip"], accept_multiple_files=True, key="s_pdf")
+
+            with col_c:
+                st.subheader("📉 Compras y Gastos")
+                purch_json = st.file_uploader("Arrastra tus JSON de Compras (Múltiples)", type=["json"], accept_multiple_files=True, key="p_json")
+                purch_pdf = st.file_uploader("Arrastra tus PDFs de Compras (Múltiples)", type=["pdf", "zip"], accept_multiple_files=True, key="p_pdf")
+                
+            st.divider()
+            st.subheader("📝 Notas Aclaratorias, Sugerencias y Observaciones por Documento o Mes")
+            client_notes = st.text_area(
+                "Usa este espacio para detallar aclaraciones sobre documentos específicos:",
+                placeholder="Ej. El DTE-03 número... corresponde a una anulación extemporánea...",
+                key="notes_input"
+            )
+                
+            submit_files = st.form_submit_button("🚀 Validar y Enviar Documentación con Notas", use_container_width=True)
+            
+            if submit_files:
+                if sales_json or purch_json:
+                    json_valido = True
+                    archivo_fallido = ""
+                    error_detallado = ""
+                    
+                    for j_file in (sales_json or []) + (purch_json or []):
+                        try:
+                            j_file.seek(0)
+                            content = j_file.read()
+                            if isinstance(content, bytes):
+                                text_content = content.decode('utf-8-sig', errors='replace')
+                            else:
+                                text_content = content
+                            json.loads(text_content)
+                        except Exception as e:
+                            json_valido = False
+                            archivo_fallido = j_file.name
+                            error_detallado = str(e)
+                            break
+                            
+                    if json_valido:
+                        s_json_saved = save_files_to_folder(sales_json, st.session_state.username, periodo_str, "sales_json")
+                        s_pdf_saved = save_files_to_folder(sales_pdf, st.session_state.username, periodo_str, "sales_pdf")
+                        p_json_saved = save_files_to_folder(purch_json, st.session_state.username, periodo_str, "purch_json")
+                        p_pdf_saved = save_files_to_folder(purch_pdf, st.session_state.username, periodo_str, "purch_pdf")
+                        
+                        submission_record = {
+                            "user_id": current_user_id,
+                            "client": st.session_state.username,
+                            "periodo": periodo_str,
+                            "sales_json_list": s_json_saved,
+                            "sales_pdf_list": s_pdf_saved,
+                            "purch_json_list": p_json_saved,
+                            "purch_pdf_list": p_pdf_saved,
+                            "notes": client_notes,
+                            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+                        }
+                        
+                        save_submission_to_disk(submission_record)
+                        st.success(f"¡Estructura validada! Documentos y notas del periodo {periodo_str} enviados correctamente a RI Consultores.")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Error en el archivo '{archivo_fallido}': {error_detallado}")
+                else:
+                    st.warning("Adjunta al menos un archivo JSON principal antes de enviar.")
+
+    with client_tab2:
+        st.subheader("📊 Historial de Declaraciones, Resumen Ejecutivo de IVA y Trazabilidad DTE")
+        
+        if mis_envios:
+            st.info("Visualiza el detalle de tus declaraciones, las notas enviadas, el resumen de IVA y los códigos de generación correspondientes.")
+            for envio in mis_envios:
+                with st.expander(f"📅 Periodo: {envio['periodo']} — Entregado el {envio['fecha']}"):
+                    
+                    if envio.get('notes'):
+                        st.markdown("##### 📝 Tus Notas / Aclaraciones Enviadas")
+                        st.info(envio['notes'])
+                        st.markdown("---")
+                    
+                    df_sales = extract_invoice_summary(envio.get('sales_json_list'))
+                    df_purch = extract_invoice_summary(envio.get('purch_json_list'))
+                    
+                    v_val = df_sales['Valor'].sum() if not df_sales.empty else 0.0
+                    v_iva = df_sales['IVA'].sum() if not df_sales.empty else 0.0
+                    v_tot = df_sales['Total'].sum() if not df_sales.empty else 0.0
+                    
+                    p_val = df_purch['Valor'].sum() if not df_purch.empty else 0.0
+                    p_iva = df_purch['IVA'].sum() if not df_purch.empty else 0.0
+                    p_tot = df_purch['Total'].sum() if not df_purch.empty else 0.0
+                    
+                    st.markdown("##### 💼 Resumen Ejecutivo de IVA")
+                    col_re1, col_re2, col_re3 = st.columns(3)
+                    col_re1.metric("Débito Fiscal (IVA Ventas)", f"${v_iva:,.2f}")
+                    col_re2.metric("Crédito Fiscal (IVA Compras)", f"${p_iva:,.2f}")
+                    
+                    iva_neto = v_iva - p_iva
+                    if iva_neto >= 0:
+                        col_re3.metric("IVA a Pagar Estimado", f"${iva_neto:,.2f}", delta_color="inverse")
+                    else:
+                        col_re3.metric("Remanente de IVA a Favor", f"${abs(iva_neto):,.2f}", delta_color="normal")
+                    
+                    st.markdown("---")
+                    st.markdown("##### 📈 Detalle de Ventas (Trazabilidad DTE)")
+                    if not df_sales.empty:
+                        col_m1, col_m2, col_m3 = st.columns(3)
+                        col_m1.metric("Subtotal Ventas", f"${v_val:,.2f}")
+                        col_m2.metric("IVA Ventas", f"${v_iva:,.2f}")
+                        col_m3.metric("Total Ventas", f"${v_tot:,.2f}")
+                        
+                        st.dataframe(
+                            df_sales.style.format({
+                                "Valor": "${:,.2f}",
+                                "IVA": "${:,.2f}",
+                                "Total": "${:,.2f}"
+                            }),
+                            use_container_width=True
+                        )
+                    else:
+                        st.text("Sin registros de ventas detallados para este periodo.")
+                        
+                    st.markdown("---")
+                    st.markdown("##### 📉 Detalle de Compras y Gastos (Trazabilidad DTE)")
+                    if not df_purch.empty:
+                        col_pm1, col_pm2, col_pm3 = st.columns(3)
+                        col_pm1.metric("Subtotal Compras", f"${p_val:,.2f}")
+                        col_pm2.metric("IVA Compras", f"${p_iva:,.2f}")
+                        col_pm3.metric("Total Compras", f"${p_tot:,.2f}")
+                        
+                        st.dataframe(
+                            df_purch.style.format({
+                                "Valor": "${:,.2f}",
+                                "IVA": "${:,.2f}",
+                                "Total": "${:,.2f}"
+                            }),
+                            use_container_width=True
+                        )
+                    else:
+                        st.text("Sin registros de compras detallados para este periodo.")
+        else:
+            st.warning("⚠️ Aún no has registrado envíos de documentos en el portal.")
+
+    with client_tab3:
+        st.subheader("💼 Generador de Planillas, Retenciones y Guardado de Empleados")
+        with st.form("form_planilla"):
+            es_eventual = st.checkbox("👤 Marcar como Empleado Eventual / Prestador de Servicios (10% fijo)")
+            q_empleado = st.text_input("Nombre del Empleado / Prestador")
+            q_dui = st.text_input("Número de DUI", placeholder="00000000-0")
+            q_salario = st.number_input("Salario Base / Mensual ($)", min_value=0.0, value=600.0)
+            q_comisiones = st.number_input("Comisiones ($)", min_value=0.0, value=0.0)
+            h_diurnas = st.number_input("Horas Extras Diurnas", min_value=0.0, value=0.0)
+            h_nocturnas = st.number_input("Horas Extras Nocturnas", min_value=0.0, value=0.0)
+            otras_ded = st.number_input("Otras Deducciones ($)", min_value=0.0, value=0.0)
+            
+            calcular_btn = st.form_submit_button("Calcular Planilla", use_container_width=True)
+            if calcular_btn:
+                if q_empleado.strip() == "":
+                    st.warning("Por favor ingresa el nombre del empleado.")
+                else:
+                    if es_eventual:
+                        tarifa_h_ev = (q_salario / 30.0) / 8.0
+                        p_diurnas_ev = h_diurnas * tarifa_h_ev * 2.0
+                        p_nocturnas_ev = h_nocturnas * tarifa_h_ev * 2.25
+                        tot_grav = (q_salario / 2.0) + q_comisiones + p_diurnas_ev + p_nocturnas_ev
+                        renta = tot_grav * 0.10
+                        liquido = tot_grav - renta - otras_ded
+                        st.session_state.calc_result = {
+                            "Tipo": "Eventual (10%)",
+                            "Nombre": q_empleado,
+                            "DUI": q_dui,
+                            "Total Devengado": round(tot_grav, 2),
+                            "ISSS": 0.0,
+                            "AFP": 0.0,
+                            "Renta": round(renta, 2),
+                            "Líquido": round(liquido, 2),
+                            "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+                        }
+                    else:
+                        tot_grav, isss, afp, renta, liq = calcular_empleado_quincenal(q_salario, q_comisiones, h_diurnas, h_nocturnas, otras_ded)
+                        st.session_state.calc_result = {
+                            "Tipo": "Quincenal",
+                            "Nombre": q_empleado,
+                            "DUI": q_dui,
+                            "Total Devengado": round(tot_grav, 2),
+                            "ISSS": round(isss, 2),
+                            "AFP": round(afp, 2),
+                            "Renta": round(renta, 2),
+                            "Líquido": round(liq, 2),
+                            "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+                        }
+                    st.success("¡Cálculo realizado con éxito! Revisa el resultado abajo para guardarlo.")
+
         if st.session_state.calc_result:
             res = st.session_state.calc_result
-            st.success(f"Resultado: **{res['Nombre']}** (DUI: {res['DUI']})")
-            if st.button("💾 Guardar Registro en Base de Datos"):
-                res["Fecha"] = datetime.now().strftime("%Y-%m-%d")
+            st.markdown("##### 📌 Resultado del Cálculo Actual")
+            st.info(f"**Empleado:** {res['Nombre']} | **DUI:** {res['DUI'] or 'N/A'} | **Tipo:** {res['Tipo']}")
+            
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Devengado", f"${res['Total Devengado']:,.2f}")
+            m2.metric("Renta", f"${res['Renta']:,.2f}")
+            m3.metric("Otras/Seguridad", f"${res.get('ISSS', 0.0) + res.get('AFP', 0.0):,.2f}")
+            m4.metric("Líquido", f"${res['Líquido']:,.2f}")
+            
+            if st.button("💾 Guardar Registro de Empleado en Base de Datos", use_container_width=True):
                 save_employee_record(res)
-                st.success("¡Registro guardado con éxito!")
-                st.session_state.calc_result = None # Limpiar
+                st.success("¡Registro de empleado guardado correctamente en `employees_db.json`!")
+                st.session_state.calc_result = None
                 st.rerun()
 
         st.divider()
-        st.subheader("📋 Historial de Empleados Guardados")
-        emp_records = load_json_db(EMPLOYEES_DB)
+        st.subheader("📋 Base de Datos de Empleados / Prestadores Guardados")
+        emp_records = load_employee_db()
         if emp_records:
             st.dataframe(pd.DataFrame(emp_records), use_container_width=True)
+        else:
+            st.info("No hay empleados o prestadores guardados todavía.")
 
-# --- Ejecución ---
-if not st.session_state.logged_in: login_screen()
+# --- Control de Sesión ---
+if not st.session_state.logged_in:
+    login_screen()
 else:
-    if st.sidebar.button("Cerrar Sesión"):
-        st.session_state.logged_in = False
-        st.rerun()
-    client_dashboard()
+    with st.sidebar:
+        st.write(f"Conectado como:\n**{st.session_state.username}**")
+        st.divider()
+        if st.button("Cerrar Sesión", type="primary"):
+            st.session_state.logged_in = False
+            st.session_state.user_role = None
+            st.session_state.username = ""
+            st.session_state.user_id = ""
+            st.rerun()
+            
+    if st.session_state.user_role == "admin":
+        admin_dashboard()
+    elif st.session_state.user_role == "client":
+        client_dashboard()
