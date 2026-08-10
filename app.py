@@ -70,7 +70,7 @@ def create_zip_buffer(json_list, pdf_list):
     return zip_buffer.getvalue()
 
 def extract_invoice_summary(file_list):
-    """Extrae el Código de Generación, Número de Control (DTE-03), valor, iva y total con validación robusta y ecuaciones cruzadas."""
+    """Extrae el Código de Generación, Número de Control (DTE-03), valor, iva y total con validación robusta."""
     summary_data = []
     if not file_list:
         return pd.DataFrame()
@@ -221,6 +221,8 @@ if "user_id" not in st.session_state:
 
 if "clients_db" not in st.session_state:
     st.session_state.clients_db = {}
+if "eventuales_db" not in st.session_state:
+    st.session_state.eventuales_db = []
 
 # --- Sincronización de Clientes Oficiales ---
 official_clients = {
@@ -276,12 +278,12 @@ def admin_dashboard():
             
         periodo_seleccionado = f"{filtro_mes} {filtro_anio}"
         all_submissions = load_submissions()
-        envios_periodo = [s for s in all_submissions if s["periodo"] == periodo_seleccionado]
+        envios_periodo = [s for s in all_submissions if periodo_seleccionado in s["periodo"]]
         
         if envios_periodo:
-            st.success(f"Se encontraron {len(envios_periodo)} entregas para el periodo {periodo_seleccionado}.")
+            st.success(f"Se encontraron {len(envios_periodo)} entregas relacionadas con el periodo {periodo_seleccionado}.")
             for idx, envio in enumerate(envios_periodo):
-                with st.expander(f"📁 {envio['client']} — Entregado el {envio['fecha']}"):
+                with st.expander(f"📁 {envio['client']} ({envio['periodo']}) — Entregado el {envio['fecha']}"):
                     if envio.get('notes'):
                         st.info(f"**📝 Notas / Aclaraciones del Cliente:**\n\n{envio['notes']}")
                     
@@ -350,7 +352,7 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-# --- Panel del Cliente con Pestañas Principales Exactas y Selector de Rango/Quincenas ---
+# --- Panel del Cliente ---
 def client_dashboard():
     st.title(f"📁 PORTAL DE CONTRIBUYENTE — {st.session_state.username}")
     st.markdown("Gestión documental, notas aclaratorias y generación de planillas fiscales.")
@@ -391,7 +393,7 @@ def client_dashboard():
         "CARGA DOCUMENTAL Y NOTAS", 
         "GENERADOR DE PLANILLAS", 
         "HISTORIAL Y RESUMEN",
-        "CALCULOS MENSUALES PARA EVENTUALES 10%"
+        "PLANILLA MENSUAL EVENTUALES (10%)"
     ])
     
     with client_tab1:
@@ -466,13 +468,13 @@ def client_dashboard():
                     st.warning("Adjunta al menos un archivo JSON principal antes de enviar.")
 
     with client_tab2:
-        st.subheader("💼 GENERADOR DE PLANILLAS Y CÁLCULOS FISCALES (ISSS, AFP, RENTA)")
-        st.info("ℹ️ Cálculo automático de deducciones de ley para El Salvador según ingresos y horas extras.")
+        st.subheader("💼 GENERADOR DE PLANILLAS QUINCENALES (ISSS, AFP, RENTA)")
+        st.info("ℹ️ Cálculo automático de deducciones de ley quincenales para empleados fijos en El Salvador.")
         
         with st.form("form_planilla_quincenal"):
             col_q1, col_q2 = st.columns(2)
             with col_q1:
-                q_empleado = st.text_input("Nombre del Empleado")
+                q_empleado = st.text_input("Nombre del Empleado Fijo")
                 q_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, step=10.0, value=600.0, key="q_sal")
                 q_comisiones = st.number_input("Comisiones / Otros Ingresos ($)", min_value=0.0, step=5.0, key="q_com")
             with col_q2:
@@ -480,12 +482,12 @@ def client_dashboard():
                 h_nocturnas = st.number_input("Horas Extras Nocturnas (225%)", min_value=0.0, step=1.0, key="h_n")
                 otras_deducciones = st.number_input("Otras Deducciones / Anticipos ($)", min_value=0.0, step=5.0, key="otras_ded")
             
-            btn_q = st.form_submit_button("Calcular Planilla del Periodo", use_container_width=True)
+            btn_q = st.form_submit_button("Calcular Planilla Quincenal", use_container_width=True)
             if btn_q:
                 tot_grav, isss_val, afp_val, renta_val, liquido_val = calcular_empleado_quincenal(
                     q_salario, q_comisiones, h_diurnas, h_nocturnas, otras_deducciones
                 )
-                st.success(f"Resultado para: **{q_empleado or 'Empleado'}** ({quincena_op})")
+                st.success(f"Resultado Quincenal para: **{q_empleado or 'Empleado'}** ({quincena_op})")
                 
                 mc1, mc2, mc3, mc4, mc5 = st.columns(5)
                 mc1.metric("Total Devengado", f"${tot_grav:,.2f}")
@@ -569,23 +571,59 @@ def client_dashboard():
             st.warning("⚠️ Aún no has registrado envíos de documentos en el portal.")
 
     with client_tab4:
-        st.subheader("🧾 CÁLCULOS MENSUALES PARA EVENTUALES 10%")
-        st.info("ℹ️ Este módulo calcula de forma automática el monto bruto, aplica la retención fiscal del 10% correspondiente a servicios eventuales u honorarios y determina el líquido a pagar.")
+        st.subheader(f"🧾 PLANILLA MENSUAL DE PERSONAL EVENTUAL — {mes.upper()} {anio}")
+        st.info("ℹ️ Este módulo opera exclusivamente por **mes completo** (pago mensual único) aplicando la retención fija de Renta del **10%** para servicios eventuales u honorarios independientes de las quincenas.")
         
-        with st.form("form_eventuales_10"):
-            ev_nombre = st.text_input("Nombre del Personal Eventual / Prestador de Servicios")
-            ev_monto = st.number_input("Monto Bruto Acumulado del Mes / Factura ($)", min_value=0.0, step=10.0, key="ev_monto")
+        with st.form("form_eventuales_mensual"):
+            ev_nombre = st.text_input("Nombre del Prestador / Personal Eventual")
+            ev_monto = st.number_input("Monto Bruto del Mes / Honorario ($)", min_value=0.0, step=10.0, key="ev_monto")
+            btn_add_ev = st.form_submit_button("➕ Agregar a la Planilla Mensual de Eventuales", use_container_width=True)
             
-            btn_ev = st.form_submit_button("Calcular Retención del 10%", use_container_width=True)
-            if btn_ev:
-                retencion_10 = ev_monto * 0.10
-                liquido_pagar = ev_monto - retencion_10
-                
-                st.success(f"Cálculo Mensual para Eventual: **{ev_nombre or 'General'}**")
-                col_e1, col_e2, col_e3 = st.columns(3)
-                col_e1.metric("Monto Bruto", f"${ev_monto:,.2f}")
-                col_e2.metric("Retención de Renta (10%)", f"${retencion_10:,.2f}")
-                col_e3.metric("Líquido a Pagar", f"${liquido_pagar:,.2f}")
+            if btn_add_ev:
+                if ev_nombre and ev_monto > 0:
+                    retencion_10 = ev_monto * 0.10
+                    liquido_pagar = ev_monto - retencion_10
+                    st.session_state.eventuales_db.append({
+                        "Mes": f"{mes} {anio}",
+                        "Nombre": ev_nombre,
+                        "Monto Bruto": ev_monto,
+                        "Retención Renta (10%)": retencion_10,
+                        "Líquido a Pagar": liquido_pagar
+                    })
+                    st.success(f"¡Personal eventual **{ev_nombre}** agregado correctamente al mes de {mes} {anio}!")
+                else:
+                    st.warning("Ingrese un nombre válido y un monto mayor a 0.")
+                    
+        st.markdown("---")
+        st.markdown("##### 📋 Listado de Pagos y Retenciones del Mes")
+        mes_actual_str = f"{mes} {anio}"
+        registros_mes = [r for r in st.session_state.eventuales_db if r["Mes"] == mes_actual_str]
+        
+        if registros_mes:
+            df_ev = pd.DataFrame(registros_mes)
+            st.dataframe(
+                df_ev[["Nombre", "Monto Bruto", "Retención Renta (10%)", "Líquido a Pagar"]].style.format({
+                    "Monto Bruto": "${:,.2f}",
+                    "Retención Renta (10%)": "${:,.2f}",
+                    "Líquido a Pagar": "${:,.2f}"
+                }),
+                use_container_width=True
+            )
+            
+            tot_bruto_ev = sum(r["Monto Bruto"] for r in registros_mes)
+            tot_ret_ev = sum(r["Retención Renta (10%)"] for r in registros_mes)
+            tot_liq_ev = sum(r["Líquido a Pagar"] for r in registros_mes)
+            
+            ce1, ce2, ce3 = st.columns(3)
+            ce1.metric("Total Bruto Mensual", f"${tot_bruto_ev:,.2f}")
+            ce2.metric("Total Retención 10%", f"${tot_ret_ev:,.2f}")
+            ce3.metric("Total Líquido a Pagar", f"${tot_liq_ev:,.2f}")
+            
+            if st.button("🗑️ Limpiar Registros Eventuales de este Mes", type="secondary"):
+                st.session_state.eventuales_db = [r for r in st.session_state.eventuales_db if r["Mes"] != mes_actual_str]
+                st.rerun()
+        else:
+            st.info(f"No hay personal eventual registrado todavía para el mes de {mes_actual_str}.")
 
 # --- Control de Sesión ---
 if not st.session_state.logged_in:
