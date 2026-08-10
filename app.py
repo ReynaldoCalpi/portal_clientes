@@ -350,7 +350,7 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-# --- Panel del Cliente con Pestañas Principales Exactas ---
+# --- Panel del Cliente con Pestañas Principales Exactas y Selector de Rango/Quincenas ---
 def client_dashboard():
     st.title(f"📁 PORTAL DE CONTRIBUYENTE — {st.session_state.username}")
     st.markdown("Gestión documental, notas aclaratorias y generación de planillas fiscales.")
@@ -361,9 +361,17 @@ def client_dashboard():
     with col_p2:
         anio = st.selectbox("AÑO FISCAL", [2026, 2025], index=0, key="client_anio")
     with col_p3:
-        quincena_op = st.selectbox("QUINCENA", ["Primera Quincena (Del 1 al 15)", "Segunda Quincena (Del 16 al Fin de Mes)"], key="client_quincena")
+        quincena_op = st.selectbox(
+            "PERIODO / QUINCENA", 
+            [
+                "Primera Quincena (Del 1 al 15)", 
+                "Segunda Quincena (Del 16 al Fin de Mes)", 
+                "Mes Completo (Todo el mes)"
+            ], 
+            key="client_quincena"
+        )
         
-    periodo_str = f"{mes} {anio}"
+    periodo_str = f"{mes} {anio} - {quincena_op}"
     
     current_user_id = st.session_state.get("user_id", st.session_state.username)
     all_submissions = load_submissions()
@@ -374,7 +382,7 @@ def client_dashboard():
     if envio_actual:
         st.success(f"✔️ **Periodo {periodo_str} al día:** Tus documentos han sido recibidos correctamente y se encuentran en proceso de auditoría por RI Consultores.")
     else:
-        st.warning(f"⚠️ **Acción requerida para {periodo_str}:** Aún no has enviado la información de tus documentos de Ventas y Compras. Por favor cárgalos en la pestaña correspondiente.")
+        st.warning(f"⚠️ **Acción requerida para {periodo_str}:** Aún no has enviado la información de tus documentos. Por favor cárgalos en la pestaña correspondiente.")
         
     st.divider()
     
@@ -464,7 +472,7 @@ def client_dashboard():
         with st.form("form_planilla_quincenal"):
             col_q1, col_q2 = st.columns(2)
             with col_q1:
-                q_empleado = st.text_input("Nombre del Empleado Quincenal")
+                q_empleado = st.text_input("Nombre del Empleado")
                 q_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, step=10.0, value=600.0, key="q_sal")
                 q_comisiones = st.number_input("Comisiones / Otros Ingresos ($)", min_value=0.0, step=5.0, key="q_com")
             with col_q2:
@@ -472,12 +480,12 @@ def client_dashboard():
                 h_nocturnas = st.number_input("Horas Extras Nocturnas (225%)", min_value=0.0, step=1.0, key="h_n")
                 otras_deducciones = st.number_input("Otras Deducciones / Anticipos ($)", min_value=0.0, step=5.0, key="otras_ded")
             
-            btn_q = st.form_submit_button("Calcular Planilla Quincenal", use_container_width=True)
+            btn_q = st.form_submit_button("Calcular Planilla del Periodo", use_container_width=True)
             if btn_q:
                 tot_grav, isss_val, afp_val, renta_val, liquido_val = calcular_empleado_quincenal(
                     q_salario, q_comisiones, h_diurnas, h_nocturnas, otras_deducciones
                 )
-                st.success(f"Resultado Quincenal para: **{q_empleado or 'Empleado'}** ({quincena_op})")
+                st.success(f"Resultado para: **{q_empleado or 'Empleado'}** ({quincena_op})")
                 
                 mc1, mc2, mc3, mc4, mc5 = st.columns(5)
                 mc1.metric("Total Devengado", f"${tot_grav:,.2f}")
