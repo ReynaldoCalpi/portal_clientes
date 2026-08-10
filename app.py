@@ -327,7 +327,7 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-# --- Panel del Cliente con las Pestañas Principales Solicitadas ---
+# --- Panel del Cliente con Pestañas Principales Exactas ---
 def client_dashboard():
     st.title(f"📁 PORTAL DE CONTRIBUYENTE — {st.session_state.username}")
     st.markdown("Gestión documental, notas aclaratorias y generación de planillas fiscales.")
@@ -355,12 +355,12 @@ def client_dashboard():
         
     st.divider()
     
-    # --- PESTAÑAS PRINCIPALES DEL PORTAL ---
+    # --- PESTAÑAS PRINCIPALES ---
     client_tab1, client_tab2, client_tab3, client_tab4 = st.tabs([
-        "📁 CARGA DOCUMENTAL Y NOTAS", 
-        "💼 GENERADOR DE PLANILLAS", 
-        "📊 HISTORIAL Y RESUMEN",
-        "🧾 CÁLCULOS MENSUALES PARA EVENTUALES 10%"
+        "CARGA DOCUMENTAL Y NOTAS", 
+        "GENERADOR DE PLANILLAS", 
+        "HISTORIAL Y RESUMEN",
+        "CALCULOS MENSUALES PARA EVENTUALES 10%"
     ])
     
     with client_tab1:
@@ -522,7 +522,7 @@ def client_dashboard():
             st.warning("⚠️ Aún no has registrado envíos de documentos en el portal.")
 
     with client_tab4:
-        st.subheader("🧾 Cálculos Mensuales para Eventuales (10% de Retención)")
+        st.subheader("🧾 CÁLCULOS MENSUALES PARA EVENTUALES 10%")
         st.info("ℹ️ Este módulo calcula de forma automática el monto bruto, aplica la retención fiscal del 10% correspondiente a servicios eventuales u honorarios y determina el líquido a pagar.")
         
         with st.form("form_eventuales_10"):
