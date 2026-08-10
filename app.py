@@ -16,38 +16,14 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Configuración de Persistencia y Blindaje (Backups) ---
+# --- Configuración de Persistencia en Disco ---
 DB_FILE = "submissions_db.json"
 EMPLOYEES_FILE = "employees_db.json"
 EVENTUALES_FILE = "eventuales_db.json"
 UPLOAD_DIR = "uploaded_files"
-BACKUP_DIR = "system_backups"
 
-for folder in [UPLOAD_DIR, BACKUP_DIR]:
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-
-def trigger_automatic_backup():
-    """Genera un respaldo comprimido (.zip) automático de toda la app (bases de datos y archivos de clientes)."""
-    try:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_filename = os.path.join(BACKUP_DIR, f"backup_ri_consultores_{timestamp}.zip")
-        
-        with zipfile.ZipFile(backup_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
-            # Respaldar bases de datos JSON
-            for db_file in [DB_FILE, EMPLOYEES_FILE, EVENTUALES_FILE]:
-                if os.path.exists(db_file):
-                    zipf.write(db_file, arcname=db_file)
-            
-            # Respaldar todos los archivos físicos de los clientes organizados
-            if os.path.exists(UPLOAD_DIR):
-                for root, dirs, files in os.walk(UPLOAD_DIR):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        arcname = os.path.relpath(file_path, start=".")
-                        zipf.write(file_path, arcname=arcname)
-    except Exception:
-        pass
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR)
 
 def load_submissions():
     if os.path.exists(DB_FILE):
@@ -63,7 +39,6 @@ def save_submission_to_disk(submission_data):
     submissions.append(submission_data)
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(submissions, f, ensure_ascii=False, indent=4)
-    trigger_automatic_backup()
 
 def load_json_db(file_path):
     if os.path.exists(file_path):
@@ -77,7 +52,6 @@ def load_json_db(file_path):
 def save_json_db(file_path, data):
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
-    trigger_automatic_backup()
 
 def save_files_to_folder(file_list, client_name, periodo_str, category):
     saved_files_info = []
@@ -98,7 +72,6 @@ def save_files_to_folder(file_list, client_name, periodo_str, category):
             "name": file_obj.name,
             "path": file_path
         })
-    trigger_automatic_backup()
     return saved_files_info
 
 def create_zip_buffer(json_list, pdf_list):
@@ -287,14 +260,9 @@ def login_screen():
 # --- Panel de Administración ---
 def admin_dashboard():
     st.title("🎛️ Panel de Control - Administrador")
-    st.markdown("Supervisa el cumplimiento fiscal, administra cuentas y gestiona los respaldos de seguridad del sistema.")
+    st.markdown("Supervisa el cumplimiento fiscal, administra cuentas y revisa los documentos cargados en tiempo real.")
     
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📋 Estatus y Archivos Recibidos", 
-        "➕ Crear Nuevo Usuario", 
-        "👥 Listado de Cuentas",
-        "🛡️ Sistema de Blindaje y Respaldos"
-    ])
+    tab1, tab2, tab3 = st.tabs(["📋 Estatus y Archivos Recibidos", "➕ Crear Nuevo Usuario", "👥 Listado de Cuentas"])
     
     with tab1:
         st.subheader("Control de Recepción y Descarga de Documentos y Planillas")
@@ -479,39 +447,6 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-    with tab4:
-        st.subheader("🛡️ Centro de Blindaje y Respaldos Automáticos del Sistema")
-        st.markdown("El sistema guarda copias de seguridad comprimidas automáticamente cada vez que se realiza un envío, carga o modificación. Puedes descargar un respaldo maestro completo de toda la aplicación en cualquier momento.")
-        
-        if st.button("🔄 Generar y Descargar Backup Global Actual Ahora", use_container_width=True, type="primary"):
-            trigger_automatic_backup()
-            
-        st.divider()
-        st.markdown("##### 📂 Historial de Respaldos Automáticos en Servidor")
-        if os.path.exists(BACKUP_DIR):
-            backup_files = sorted(os.listdir(BACKUP_DIR), reverse=True)
-            if backup_files:
-                st.success(f"Se encontraron {len(backup_files)} respaldos automáticos en la carpeta `{BACKUP_DIR}/`.")
-                for b_file in backup_files[:10]: # Mostrar los 10 más recientes
-                    b_path = os.path.join(BACKUP_DIR, b_file)
-                    b_size = os.path.getsize(b_path) / (1024 * 1024) # en MB
-                    with open(b_path, "rb") as bf:
-                        b_bytes = bf.read()
-                    
-                    col_b1, col_b2 = st.columns([3, 1])
-                    col_b1.text(f"📦 {b_file} ({b_size:.2f} MB)")
-                    col_b2.download_button(
-                        label="Descargar",
-                        data=b_bytes,
-                        file_name=b_file,
-                        mime="application/zip",
-                        key=f"dl_backup_{b_file}"
-                    )
-            else:
-                st.info("Aún no hay respaldos automáticos generados.")
-        else:
-            st.warning("La carpeta de respaldos está vacía.")
-
 # --- Panel del Cliente con las Pestañas Principales Solicitadas ---
 def client_dashboard():
     st.title(f"📁 PORTAL DE CONTRIBUYENTE — {st.session_state.username}")
@@ -622,15 +557,8 @@ def client_dashboard():
     with client_tab2:
         st.subheader("💼 MANTENIMIENTO DE PERSONAL Y PLANILLA QUINCENAL")
         
-        # --- INICIO DEL AJUSTE SEGURO ---
-# 1. Verificar y asegurar que 'employees_db' exista en session_state y sea un diccionario
-if "employees_db" not in st.session_state or not isinstance(st.session_state.employees_db, dict):
-    st.session_state.employees_db = {}
-
-# 2. Inicializar la clave del usuario de forma segura solo si no existe o no es una lista
-if current_user_id not in st.session_state.employees_db or not isinstance(st.session_state.employees_db[current_user_id], list):
-    st.session_state.employees_db[current_user_id] = []
-# --- FIN DEL AJUSTE SEGURO ---
+        if current_user_id not in st.session_state.employees_db:
+            st.session_state.employees_db[current_user_id] = []
             
         emp_tab_add, emp_tab_manage, emp_tab_calc = st.tabs(["➕ Cargar Empleado", "✏️ Editar / Borrar Empleados", "🧮 Cálculo de Planilla"])
         
