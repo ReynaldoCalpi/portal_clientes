@@ -622,8 +622,15 @@ def client_dashboard():
     with client_tab2:
         st.subheader("💼 MANTENIMIENTO DE PERSONAL Y PLANILLA QUINCENAL")
         
-        if current_user_id not in st.session_state.employees_db:
-            st.session_state.employees_db[current_user_id] = []
+        # --- INICIO DEL AJUSTE SEGURO ---
+# 1. Verificar y asegurar que 'employees_db' exista en session_state y sea un diccionario
+if "employees_db" not in st.session_state or not isinstance(st.session_state.employees_db, dict):
+    st.session_state.employees_db = {}
+
+# 2. Inicializar la clave del usuario de forma segura solo si no existe o no es una lista
+if current_user_id not in st.session_state.employees_db or not isinstance(st.session_state.employees_db[current_user_id], list):
+    st.session_state.employees_db[current_user_id] = []
+# --- FIN DEL AJUSTE SEGURO ---
             
         emp_tab_add, emp_tab_manage, emp_tab_calc = st.tabs(["➕ Cargar Empleado", "✏️ Editar / Borrar Empleados", "🧮 Cálculo de Planilla"])
         
