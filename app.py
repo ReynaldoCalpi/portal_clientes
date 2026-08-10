@@ -527,6 +527,7 @@ def client_dashboard():
         
         with st.form("form_eventuales_10"):
             ev_nombre = st.text_input("Nombre del Personal Eventual / Prestador de Servicios")
+            ev_dui = st.text_input("DUI del Prestador de Servicios (ej. 00000000-0)")
             ev_monto = st.number_input("Monto Bruto Acumulado del Mes / Factura ($)", min_value=0.0, step=10.0, key="ev_monto")
             
             btn_ev = st.form_submit_button("Calcular Retención del 10%", use_container_width=True)
@@ -534,7 +535,8 @@ def client_dashboard():
                 retencion_10 = ev_monto * 0.10
                 liquido_pagar = ev_monto - retencion_10
                 
-                st.success(f"Cálculo Mensual para Eventual: **{ev_nombre or 'General'}**")
+                dui_text = f" - DUI: {ev_dui}" if ev_dui else ""
+                st.success(f"Cálculo Mensual para Eventual: **{ev_nombre or 'General'}**{dui_text}")
                 col_e1, col_e2, col_e3 = st.columns(3)
                 col_e1.metric("Monto Bruto", f"${ev_monto:,.2f}")
                 col_e2.metric("Retención de Renta (10%)", f"${retencion_10:,.2f}")
