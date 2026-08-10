@@ -651,7 +651,7 @@ def client_dashboard():
                 
         with ev_tab_calc:
             st.subheader("🧮 Cálculo Masivo y Planilla de Retención (10% Eventuales)")
-            st.info("ℹ️ Este módulo calcula de forma simultánea la retención de renta del 10% para **todos** los prestadores eventuales registrados, generando la planilla consolidada del periodo.")
+            st.info(f"ℹ️ Periodo fiscal en curso: **{periodo_str}**. Este módulo calcula la retención de renta del 10% para todos los prestadores eventuales y genera la planilla consolidada.")
             
             evs = st.session_state.eventuales_db.get(current_user_id, [])
             
@@ -708,7 +708,7 @@ def client_dashboard():
                     
                     df_planilla = pd.DataFrame(planilla_data)
                     
-                    st.success("¡Planilla de Eventuales calculada exitosamente!")
+                    st.success(f"¡Planilla de Eventuales para el periodo **{periodo_str}** calculada exitosamente!")
                     
                     st.markdown("##### 📊 Resumen Consolidado de la Planilla")
                     col_m1, col_m2, col_m3 = st.columns(3)
@@ -726,16 +726,37 @@ def client_dashboard():
                         use_container_width=True
                     )
                     
-                    # Generación de Excel con formato profesional
+                    # Generación de Excel con formato profesional, periodo y totales generales
                     output = io.BytesIO()
+                    
+                    total_row_df = pd.DataFrame([{
+                        "Prestador Eventual": "TOTALES GENERALES",
+                        "DUI": "",
+                        "Monto Bruto": total_bruto,
+                        "Retención 10%": total_retencion,
+                        "Líquido a Pagar": total_liquido
+                    }])
+                    df_export = pd.concat([df_planilla, total_row_df], ignore_index=True)
+                    
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        df_planilla.to_excel(writer, index=False, sheet_name='Planilla Eventuales')
+                        df_export.to_excel(writer, index=False, sheet_name='Planilla Eventuales', startrow=4)
                         workbook = writer.book
                         worksheet = writer.sheets['Planilla Eventuales']
                         
-                        # Estilos profesionales (Encabezado corporativo azul oscuro, bordes delgados, fuentes limpias)
+                        # Metadatos superiores (Nombre de la planilla y periodo de referencia)
+                        worksheet['A1'] = "RI CONSULTORES — PLANILLA DE RETENCIÓN DE RENTA (10% EVENTUALES)"
+                        worksheet['A2'] = f"Periodo Fiscal / Mes de Referencia: {periodo_str}"
+                        worksheet['A3'] = f"Cliente / Contribuyente: {st.session_state.username}"
+                        
+                        # Estilos profesionales
+                        title_font = Font(name='Calibri', size=12, bold=True, color='1F4E78')
+                        subtitle_font = Font(name='Calibri', size=10, bold=True, color='595959')
                         header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
                         header_fill = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')
+                        
+                        total_font = Font(name='Calibri', size=11, bold=True, color='000000')
+                        total_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
+                        
                         align_center = Alignment(horizontal='center', vertical='center')
                         align_right = Alignment(horizontal='right', vertical='center')
                         align_left = Alignment(horizontal='left', vertical='center')
@@ -746,20 +767,39 @@ def client_dashboard():
                             top=Side(style='thin', color='D3D3D3'),
                             bottom=Side(style='thin', color='D3D3D3')
                         )
+                        thick_bottom_border = Border(
+                            left=Side(style='thin', color='D3D3D3'),
+                            right=Side(style='thin', color='D3D3D3'),
+                            top=Side(style='thin', color='D3D3D3'),
+                            bottom=Side(style='double', color='000000')
+                        )
                         
-                        # Aplicar formato a encabezados
-                        for col_num in range(1, len(df_planilla.columns) + 1):
-                            cell = worksheet.cell(row=1, column=col_num)
+                        worksheet['A1'].font = title_font
+                        worksheet['A2'].font = subtitle_font
+                        worksheet['A3'].font = subtitle_font
+                        
+                        # Fila 5: Encabezados de la tabla (startrow=4)
+                        header_row_idx = 5
+                        for col_num in range(1, len(df_export.columns) + 1):
+                            cell = worksheet.cell(row=header_row_idx, column=col_num)
                             cell.font = header_font
                             cell.fill = header_fill
                             cell.alignment = align_center
                             cell.border = thin_border
                             
-                        # Aplicar formato a filas de datos
-                        for row_idx in range(2, len(df_planilla) + 2):
-                            for col_idx in range(1, len(df_planilla.columns) + 1):
+                        # Aplicar formato a celdas de datos y fila de totales
+                        total_row_idx = header_row_idx + len(df_export)
+                        for row_idx in range(header_row_idx + 1, total_row_idx + 1):
+                            is_total_row = (row_idx == total_row_idx)
+                            for col_idx in range(1, len(df_export.columns) + 1):
                                 cell = worksheet.cell(row=row_idx, column=col_idx)
-                                cell.border = thin_border
+                                if is_total_row:
+                                    cell.font = total_font
+                                    cell.fill = total_fill
+                                    cell.border = thick_bottom_border
+                                else:
+                                    cell.border = thin_border
+                                    
                                 if col_idx in [3, 4, 5]: # Monto Bruto, Retención, Líquido
                                     cell.number_format = '$#,##0.00'
                                     cell.alignment = align_right
@@ -770,16 +810,24 @@ def client_dashboard():
                                     
                         # Auto-ajuste de ancho de columnas
                         for col in worksheet.columns:
-                            max_len = max(len(str(cell.value or '')) for cell in col)
+                            max_len = 0
+                            for cell in col:
+                                if cell.row >= 5:
+                                    val_str = str(cell.value or '')
+                                    if len(val_str) > max_len:
+                                        max_len = len(val_str)
                             col_letter = get_column_letter(col[0].column)
                             worksheet.column_dimensions[col_letter].width = max(max_len + 4, 18)
                             
                     excel_data = output.getvalue()
                     
+                    safe_client_name = st.session_state.username.replace(" ", "_").replace(".", "")
+                    file_name_download = f"Planilla_Eventuales_10_{safe_client_name}_{periodo_str.replace(' ', '_')}.xlsx"
+                    
                     st.download_button(
                         label="📥 Descargar Planilla de Eventuales en Excel (Formato Profesional)",
                         data=excel_data,
-                        file_name=f"Planilla_Eventuales_10_{periodo_str.replace(' ', '_')}.xlsx",
+                        file_name=file_name_download,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
