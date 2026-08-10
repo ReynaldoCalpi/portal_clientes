@@ -18,6 +18,8 @@ st.set_page_config(
 
 # --- Configuración de Persistencia en Disco ---
 DB_FILE = "submissions_db.json"
+EMPLOYEES_FILE = "employees_db.json"
+EVENTUALES_FILE = "eventuales_db.json"
 UPLOAD_DIR = "uploaded_files"
 
 if not os.path.exists(UPLOAD_DIR):
@@ -37,6 +39,19 @@ def save_submission_to_disk(submission_data):
     submissions.append(submission_data)
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(submissions, f, ensure_ascii=False, indent=4)
+
+def load_json_db(file_path):
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_json_db(file_path, data):
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
 def save_files_to_folder(file_list, client_name, periodo_str, category):
     saved_files_info = []
@@ -189,7 +204,7 @@ def extract_invoice_summary(file_list):
                 })
     return pd.DataFrame(summary_data)
 
-# --- Inicialización de Estados de Sesión ---
+# --- Inicialización de Estados de Sesión y Bases Persistentes ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "user_role" not in st.session_state:
@@ -202,9 +217,9 @@ if "user_id" not in st.session_state:
 if "clients_db" not in st.session_state:
     st.session_state.clients_db = {}
 if "employees_db" not in st.session_state:
-    st.session_state.employees_db = {}
+    st.session_state.employees_db = load_json_db(EMPLOYEES_FILE)
 if "eventuales_db" not in st.session_state:
-    st.session_state.eventuales_db = {}
+    st.session_state.eventuales_db = load_json_db(EVENTUALES_FILE)
 
 # --- Sincronización de Clientes Oficiales ---
 official_clients = {
@@ -270,7 +285,6 @@ def admin_dashboard():
                         st.markdown(f"**Periodo Fiscal:** {envio['periodo']}")
                         st.markdown(f"**Resumen Consolidado:** Total Bruto: **${envio['total_bruto']:,.2f}** | Retención 10%: **${envio['total_retencion']:,.2f}** | Líquido a Pagar: **${envio['total_liquido']:,.2f}**")
                         
-                        # Regenerar Excel para el Administrador
                         df_ev_admin = pd.DataFrame(envio['data'])
                         output_adm = io.BytesIO()
                         total_row_adm = pd.DataFrame([{
@@ -466,7 +480,7 @@ def client_dashboard():
         "📁 CARGA DOCUMENTAL Y NOTAS", 
         "💼 GENERADOR DE PLANILLAS", 
         "📊 HISTORIAL Y RESUMEN",
-        "🧾 CÁLCULOS MENSUALES PARA EVENTUALES 10%"
+        "🧾 BASE Y PLANILLA DE EVENTUALES (10%)"
     ])
     
     with client_tab1:
@@ -556,11 +570,15 @@ def client_dashboard():
                 
                 if submit_add_emp:
                     if new_emp_name.strip():
+                        if current_user_id not in st.session_state.employees_db:
+                            st.session_state.employees_db[current_user_id] = []
                         st.session_state.employees_db[current_user_id].append({
                             "nombre": new_emp_name.strip(),
                             "salario": new_emp_salario
                         })
-                        st.success(f"¡Empleado **{new_emp_name.strip()}** cargado al sistema exitosamente!")
+                        save_json_db(EMPLOYEES_FILE, st.session_state.employees_db)
+                        st.success(f"¡Empleado **{new_emp_name.strip()}** cargado al sistema exitosamente y guardado en base fija!")
+                        st.rerun()
                     else:
                         st.warning("Por favor ingresa el nombre del empleado.")
                         
@@ -583,12 +601,14 @@ def client_dashboard():
                                     "nombre": ed_name.strip(),
                                     "salario": ed_salario
                                 }
-                                st.success("¡Empleado actualizado correctamente!")
+                                save_json_db(EMPLOYEES_FILE, st.session_state.employees_db)
+                                st.success("¡Empleado actualizado y guardado correctamente!")
                                 st.rerun()
                                 
                             if delete_btn:
                                 st.session_state.employees_db[current_user_id].pop(idx)
-                                st.success("¡Empleado eliminado del sistema!")
+                                save_json_db(EMPLOYEES_FILE, st.session_state.employees_db)
+                                st.success("¡Empleado eliminado del sistema permanentemente!")
                                 st.rerun()
             else:
                 st.info("No hay empleados cargados en el sistema todavía.")
@@ -693,46 +713,57 @@ def client_dashboard():
             st.warning("⚠️ Aún no has registrado envíos de documentos en el portal.")
 
     with client_tab4:
-        st.subheader("🧾 MANTENIMIENTO DE EVENTUALES Y CÁLCULO DE 10%")
+        st.subheader("🧾 BASE MAESTRO Y PLANILLA DE RETENCIÓN DE RENTA (10% EVENTUALES)")
+        st.markdown("Administra aquí tu **directorio permanente** de prestadores eventuales. Los datos que guardes aquí se mantendrán fijos y se precargarán automáticamente cada mes al generar tus planillas.")
         
         if current_user_id not in st.session_state.eventuales_db:
             st.session_state.eventuales_db[current_user_id] = []
             
-        ev_tab_add, ev_tab_manage, ev_tab_calc = st.tabs(["➕ Cargar Eventual", "✏️ Editar / Borrar Eventuales", "🧮 Calcular Todos y Crear Planilla"])
+        ev_tab_master, ev_tab_calc = st.tabs(["📂 Directorio Maestro (Base Fija)", "🧮 Generar Planilla del Periodo Actual"])
         
-        with ev_tab_add:
-            with st.form("form_add_eventual"):
-                new_ev_name = st.text_input("Nombre Completo del Prestador de Servicios")
-                new_ev_dui = st.text_input("DUI del Prestador de Servicios (ej. 00000000-0)")
-                new_ev_monto = st.number_input("Monto Bruto Habitual ($)", min_value=0.0, step=10.0, key="add_ev_monto")
-                submit_add_ev = st.form_submit_button("Cargar Eventual al Sistema", use_container_width=True)
+        with ev_tab_master:
+            st.markdown("##### ➕ Registrar Nuevo Prestador en la Base Maestro")
+            with st.form("form_add_eventual_master"):
+                col_m1, col_m2, col_m3 = st.columns(3)
+                with col_m1:
+                    new_ev_name = st.text_input("Nombre Completo")
+                with col_m2:
+                    new_ev_dui = st.text_input("DUI (ej. 00000000-0)")
+                with col_m3:
+                    new_ev_monto = st.number_input("Monto Bruto Habitual ($)", min_value=0.0, step=10.0, value=0.0)
+                    
+                submit_add_ev = st.form_submit_button("💾 Guardar en la Base Maestro", use_container_width=True)
                 
                 if submit_add_ev:
                     if new_ev_name.strip():
+                        if current_user_id not in st.session_state.eventuales_db:
+                            st.session_state.eventuales_db[current_user_id] = []
                         st.session_state.eventuales_db[current_user_id].append({
                             "nombre": new_ev_name.strip(),
                             "dui": new_ev_dui.strip(),
                             "monto": new_ev_monto
                         })
-                        st.success(f"¡Prestador eventual **{new_ev_name.strip()}** cargado al sistema exitosamente!")
+                        save_json_db(EVENTUALES_FILE, st.session_state.eventuales_db)
+                        st.success(f"¡Prestador **{new_ev_name.strip()}** guardado permanentemente en la base maestro!")
+                        st.rerun()
                     else:
-                        st.warning("Por favor ingresa el nombre del prestador eventual.")
+                        st.warning("Por favor ingresa al menos el nombre del prestador.")
                         
-        with ev_tab_manage:
-            st.subheader("Listado de Personal Eventual Registrado")
-            evs = st.session_state.eventuales_db.get(current_user_id, [])
-            if evs:
-                for idx, ev in enumerate(evs):
-                    dui_str = f" - DUI: {ev['dui']}" if ev['dui'] else ""
-                    with st.expander(f"👤 {ev['nombre']}{dui_str} — Monto Bruto Habitual: ${ev['monto']:,.2f}"):
-                        with st.form(f"edit_delete_ev_{idx}"):
+            st.divider()
+            st.markdown("##### ✏️ Listado Fijo Actual (Editar o Eliminar de la Base)")
+            evs_master = st.session_state.eventuales_db.get(current_user_id, [])
+            if evs_master:
+                for idx, ev in enumerate(evs_master):
+                    dui_str = f" — DUI: {ev['dui']}" if ev['dui'] else " — Sin DUI"
+                    with st.expander(f"👤 {ev['nombre']}{dui_str} | Base: ${ev['monto']:,.2f}"):
+                        with st.form(f"edit_delete_ev_master_{idx}"):
                             ed_ev_name = st.text_input("Editar Nombre", value=ev['nombre'], key=f"ed_ev_name_{idx}")
                             ed_ev_dui = st.text_input("Editar DUI", value=ev['dui'], key=f"ed_ev_dui_{idx}")
-                            ed_ev_monto = st.number_input("Editar Monto Bruto Habitual ($)", min_value=0.0, step=10.0, value=float(ev['monto']), key=f"ed_ev_mon_{idx}")
+                            ed_ev_monto = st.number_input("Editar Monto Bruto Base ($)", min_value=0.0, step=10.0, value=float(ev['monto']), key=f"ed_ev_mon_{idx}")
                             
                             col_btn1, col_btn2 = st.columns(2)
-                            update_ev_btn = col_btn1.form_submit_button("💾 Guardar Cambios", use_container_width=True)
-                            delete_ev_btn = col_btn2.form_submit_button("🗑️ Borrar Eventual", use_container_width=True)
+                            update_ev_btn = col_btn1.form_submit_button("💾 Actualizar Maestro", use_container_width=True)
+                            delete_ev_btn = col_btn2.form_submit_button("🗑️ Eliminar de la Base", use_container_width=True)
                             
                             if update_ev_btn:
                                 st.session_state.eventuales_db[current_user_id][idx] = {
@@ -740,28 +771,28 @@ def client_dashboard():
                                     "dui": ed_ev_dui.strip(),
                                     "monto": ed_ev_monto
                                 }
-                                st.success("¡Prestador eventual actualizado correctamente!")
+                                save_json_db(EVENTUALES_FILE, st.session_state.eventuales_db)
+                                st.success("¡Base maestro actualizada correctamente!")
                                 st.rerun()
                                 
                             if delete_ev_btn:
                                 st.session_state.eventuales_db[current_user_id].pop(idx)
-                                st.success("¡Prestador eventual eliminado del sistema!")
+                                save_json_db(EVENTUALES_FILE, st.session_state.eventuales_db)
+                                st.success("¡Prestador eliminado permanentemente de la base!")
                                 st.rerun()
             else:
-                st.info("No hay prestadores eventuales cargados en el sistema todavía.")
+                st.info("Tu base maestro de eventuales está vacía. Agrega prestadores arriba para que aparezcan fijos cada mes.")
                 
         with ev_tab_calc:
-            st.subheader("🧮 Cálculo Masivo y Planilla de Retención (10% Eventuales)")
-            st.info(f"ℹ️ Periodo fiscal en curso: **{periodo_str}**. Este módulo calcula la retención de renta del 10% para todos los prestadores eventuales y genera la planilla consolidada.")
+            st.markdown(f"##### 🧮 Planilla de Retención para el Periodo Seleccionado: **{periodo_str}**")
+            st.info("ℹ️ Los prestadores registrados en tu **Base Maestro** se cargan automáticamente abajo. Puedes confirmar o ajustar el monto bruto devengado en este periodo específico antes de exportar.")
             
-            evs = st.session_state.eventuales_db.get(current_user_id, [])
+            evs_calc = st.session_state.eventuales_db.get(current_user_id, [])
             
-            if evs:
+            if evs_calc:
                 with st.form("form_calc_all_eventuales"):
-                    st.markdown("##### Verifique o ajuste los montos brutos para la planilla actual:")
-                    
                     updated_evs_data = []
-                    for idx, ev in enumerate(evs):
+                    for idx, ev in enumerate(evs_calc):
                         col_n, col_d, col_m = st.columns([2, 1, 1])
                         with col_n:
                             st.text(ev['nombre'])
@@ -782,7 +813,7 @@ def client_dashboard():
                             "monto": monto_val
                         })
                     
-                    btn_calc_all = st.form_submit_button("🚀 Calcular Todos y Crear Planilla", use_container_width=True)
+                    btn_calc_all = st.form_submit_button("🚀 Calcular Planilla de Este Periodo", use_container_width=True)
                     
                 if btn_calc_all:
                     planilla_data = []
@@ -814,7 +845,7 @@ def client_dashboard():
                         "total_retencion": total_retencion,
                         "total_liquido": total_liquido
                     }
-                    st.success(f"¡Planilla de Eventuales para el periodo **{periodo_str}** calculada exitosamente!")
+                    st.success(f"¡Planilla de Eventuales para el periodo **{periodo_str}** calculada con éxito!")
                 
                 if "temp_planilla_eventuales" in st.session_state:
                     p_info = st.session_state["temp_planilla_eventuales"]
@@ -824,7 +855,7 @@ def client_dashboard():
                         total_retencion = p_info["total_retencion"]
                         total_liquido = p_info["total_liquido"]
                         
-                        st.markdown("##### 📊 Resumen Consolidado de la Planilla")
+                        st.markdown("##### 📊 Resumen Consolidado")
                         col_m1, col_m2, col_m3 = st.columns(3)
                         col_m1.metric("Total Bruto", f"${total_bruto:,.2f}")
                         col_m2.metric("Total Retención 10%", f"${total_retencion:,.2f}")
@@ -840,7 +871,7 @@ def client_dashboard():
                             use_container_width=True
                         )
                         
-                        # Generación de Excel con formato profesional, periodo y totales generales
+                        # Generación de Excel con formato profesional
                         output = io.BytesIO()
                         total_row_df = pd.DataFrame([{
                             "Prestador Eventual": "TOTALES GENERALES",
@@ -950,7 +981,7 @@ def client_dashboard():
                             save_submission_to_disk(planilla_submission_record)
                             st.success(f"¡Planilla de eventuales del periodo {periodo_str} enviada exitosamente al administrador!")
             else:
-                st.warning("⚠️ No hay prestadores eventuales registrados en el sistema. Por favor cargue al menos uno en la pestaña 'Cargar Eventual'.")
+                st.warning("⚠️ Tu Base Maestro está vacía. Ve a la pestaña **'Directorio Maestro (Base Fija)'** para registrar a tus prestadores eventuales por primera vez.")
 
 # --- Control de Sesión ---
 if not st.session_state.logged_in:
