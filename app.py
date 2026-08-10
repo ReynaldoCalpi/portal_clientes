@@ -364,7 +364,7 @@ def client_dashboard():
         anio = st.selectbox("AÑO FISCAL", [2026, 2025], index=0, key="client_anio")
     with col_p3:
         quincena_op = st.selectbox(
-            "PERIODO / QUINCENA", 
+            "PERIODO / QUINCENA GENERAL", 
             [
                 "Primera Quincena (Del 1 al 15)", 
                 "Segunda Quincena (Del 16 al Fin de Mes)", 
@@ -389,11 +389,10 @@ def client_dashboard():
     st.divider()
     
     # --- PESTAÑAS PRINCIPALES ---
-    client_tab1, client_tab2, client_tab3, client_tab4 = st.tabs([
+    client_tab1, client_tab2, client_tab3 = st.tabs([
         "CARGA DOCUMENTAL Y NOTAS", 
-        "GENERADOR DE PLANILLAS", 
-        "HISTORIAL Y RESUMEN",
-        "PLANILLA MENSUAL EVENTUALES (10%)"
+        "GENERADOR DE PLANILLAS Y RETENCIONES", 
+        "HISTORIAL Y RESUMEN"
     ])
     
     with client_tab1:
@@ -468,33 +467,70 @@ def client_dashboard():
                     st.warning("Adjunta al menos un archivo JSON principal antes de enviar.")
 
     with client_tab2:
-        st.subheader("💼 GENERADOR DE PLANILLAS QUINCENALES (ISSS, AFP, RENTA)")
-        st.info("ℹ️ Cálculo automático de deducciones de ley quincenales para empleados fijos en El Salvador.")
+        st.subheader("💼 GENERADOR DE PLANILLAS Y RETENCIONES")
+        st.info("ℹ️ Selecciona el tipo de régimen y el periodo de cálculo (Primera Quincena, Segunda Quincena o Mensual con Retención del 10%).")
         
-        with st.form("form_planilla_quincenal"):
+        with st.form("form_planilla_general"):
+            col_sel1, col_sel2 = st.columns(2)
+            with col_sel1:
+                tipo_regimen = st.selectbox("Tipo de Régimen / Cálculo", ["Tramo de Ley", "Código 60", "Retención 10%"])
+            with col_sel2:
+                periodo_calculo = st.selectbox(
+                    "Periodo de Cálculo", 
+                    [
+                        "Primera Quincena", 
+                        "Segunda Quincena", 
+                        "Mensual Retenciones 10%"
+                    ]
+                )
+                
+            st.divider()
+            
             col_q1, col_q2 = st.columns(2)
             with col_q1:
-                q_empleado = st.text_input("Nombre del Empleado Fijo")
-                q_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, step=10.0, value=600.0, key="q_sal")
+                q_empleado = st.text_input("Nombre del Empleado / Prestador Eventual")
+                q_salario = st.number_input("Salario Base / Honorario ($)", min_value=0.0, step=10.0, value=600.0, key="q_sal")
                 q_comisiones = st.number_input("Comisiones / Otros Ingresos ($)", min_value=0.0, step=5.0, key="q_com")
             with col_q2:
                 h_diurnas = st.number_input("Horas Extras Diurnas (200%)", min_value=0.0, step=1.0, key="h_d")
                 h_nocturnas = st.number_input("Horas Extras Nocturnas (225%)", min_value=0.0, step=1.0, key="h_n")
                 otras_deducciones = st.number_input("Otras Deducciones / Anticipos ($)", min_value=0.0, step=5.0, key="otras_ded")
             
-            btn_q = st.form_submit_button("Calcular Planilla Quincenal", use_container_width=True)
+            btn_q = st.form_submit_button("Calcular Planilla / Retención", use_container_width=True)
             if btn_q:
-                tot_grav, isss_val, afp_val, renta_val, liquido_val = calcular_empleado_quincenal(
-                    q_salario, q_comisiones, h_diurnas, h_nocturnas, otras_deducciones
-                )
-                st.success(f"Resultado Quincenal para: **{q_empleado or 'Empleado'}** ({quincena_op})")
-                
-                mc1, mc2, mc3, mc4, mc5 = st.columns(5)
-                mc1.metric("Total Devengado", f"${tot_grav:,.2f}")
-                mc2.metric("ISSS (3%)", f"${isss_val:,.2f}")
-                mc3.metric("AFP (7.25%)", f"${afp_val:,.2f}")
-                mc4.metric("Renta", f"${renta_val:,.2f}")
-                mc5.metric("Líquido a Recibir", f"${liquido_val:,.2f}")
+                if periodo_calculo == "Mensual Retenciones 10%":
+                    # Cálculo mensual para eventual (10% renta fijo, sin cortes quincenales ni ISSS/AFP)
+                    tarifa_hora = (q_salario / 30.0) / 8.0
+                    pago_diurnas = h_diurnas * tarifa_hora * 2.0
+                    pago_nocturnas = h_nocturnas * tarifa_hora * 2.25
+                    total_gravable = q_salario + q_comisiones + pago_diurnas + pago_nocturnas
+                    
+                    isss_val = 0.0
+                    afp_val = 0.0
+                    renta_val = total_gravable * 0.10
+                    liquido_val = total_gravable - renta_val - otras_deducciones
+                    
+                    st.success(f"Resultado Mensual (10%) para: **{q_empleado or 'Personal Eventual'}** ({mes} {anio})")
+                    
+                    mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+                    mc1.metric("Total Devengado Mensual", f"${total_gravable:,.2f}")
+                    mc2.metric("ISSS", "$0.00")
+                    mc3.metric("AFP", "$0.00")
+                    mc4.metric("Renta (10%)", f"${renta_val:,.2f}")
+                    mc5.metric("Líquido a Recibir", f"${liquido_val:,.2f}")
+                else:
+                    # Cálculo quincenal habitual para empleados fijos
+                    tot_grav, isss_val, afp_val, renta_val, liquido_val = calcular_empleado_quincenal(
+                        q_salario, q_comisiones, h_diurnas, h_nocturnas, otras_deducciones
+                    )
+                    st.success(f"Resultado Quincenal ({periodo_calculo}) - Régimen: {tipo_regimen} para: **{q_empleado or 'Empleado Fijo'}**")
+                    
+                    mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+                    mc1.metric("Total Devengado", f"${tot_grav:,.2f}")
+                    mc2.metric("ISSS (3%)", f"${isss_val:,.2f}")
+                    mc3.metric("AFP (7.25%)", f"${afp_val:,.2f}")
+                    mc4.metric("Renta", f"${renta_val:,.2f}")
+                    mc5.metric("Líquido a Recibir", f"${liquido_val:,.2f}")
 
     with client_tab3:
         st.subheader("📊 Historial de Declaraciones, Resumen Ejecutivo de IVA y Trazabilidad DTE")
@@ -569,61 +605,6 @@ def client_dashboard():
                         st.text("Sin registros de compras detallados para este periodo.")
         else:
             st.warning("⚠️ Aún no has registrado envíos de documentos en el portal.")
-
-    with client_tab4:
-        st.subheader(f"🧾 PLANILLA MENSUAL DE PERSONAL EVENTUAL — {mes.upper()} {anio}")
-        st.info("ℹ️ Este módulo opera exclusivamente por **mes completo** (pago mensual único) aplicando la retención fija de Renta del **10%** para servicios eventuales u honorarios independientes de las quincenas.")
-        
-        with st.form("form_eventuales_mensual"):
-            ev_nombre = st.text_input("Nombre del Prestador / Personal Eventual")
-            ev_monto = st.number_input("Monto Bruto del Mes / Honorario ($)", min_value=0.0, step=10.0, key="ev_monto")
-            btn_add_ev = st.form_submit_button("➕ Agregar a la Planilla Mensual de Eventuales", use_container_width=True)
-            
-            if btn_add_ev:
-                if ev_nombre and ev_monto > 0:
-                    retencion_10 = ev_monto * 0.10
-                    liquido_pagar = ev_monto - retencion_10
-                    st.session_state.eventuales_db.append({
-                        "Mes": f"{mes} {anio}",
-                        "Nombre": ev_nombre,
-                        "Monto Bruto": ev_monto,
-                        "Retención Renta (10%)": retencion_10,
-                        "Líquido a Pagar": liquido_pagar
-                    })
-                    st.success(f"¡Personal eventual **{ev_nombre}** agregado correctamente al mes de {mes} {anio}!")
-                else:
-                    st.warning("Ingrese un nombre válido y un monto mayor a 0.")
-                    
-        st.markdown("---")
-        st.markdown("##### 📋 Listado de Pagos y Retenciones del Mes")
-        mes_actual_str = f"{mes} {anio}"
-        registros_mes = [r for r in st.session_state.eventuales_db if r["Mes"] == mes_actual_str]
-        
-        if registros_mes:
-            df_ev = pd.DataFrame(registros_mes)
-            st.dataframe(
-                df_ev[["Nombre", "Monto Bruto", "Retención Renta (10%)", "Líquido a Pagar"]].style.format({
-                    "Monto Bruto": "${:,.2f}",
-                    "Retención Renta (10%)": "${:,.2f}",
-                    "Líquido a Pagar": "${:,.2f}"
-                }),
-                use_container_width=True
-            )
-            
-            tot_bruto_ev = sum(r["Monto Bruto"] for r in registros_mes)
-            tot_ret_ev = sum(r["Retención Renta (10%)"] for r in registros_mes)
-            tot_liq_ev = sum(r["Líquido a Pagar"] for r in registros_mes)
-            
-            ce1, ce2, ce3 = st.columns(3)
-            ce1.metric("Total Bruto Mensual", f"${tot_bruto_ev:,.2f}")
-            ce2.metric("Total Retención 10%", f"${tot_ret_ev:,.2f}")
-            ce3.metric("Total Líquido a Pagar", f"${tot_liq_ev:,.2f}")
-            
-            if st.button("🗑️ Limpiar Registros Eventuales de este Mes", type="secondary"):
-                st.session_state.eventuales_db = [r for r in st.session_state.eventuales_db if r["Mes"] != mes_actual_str]
-                st.rerun()
-        else:
-            st.info(f"No hay personal eventual registrado todavía para el mes de {mes_actual_str}.")
 
 # --- Control de Sesión ---
 if not st.session_state.logged_in:
