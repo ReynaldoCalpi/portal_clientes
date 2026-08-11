@@ -6,6 +6,22 @@ from datetime import datetime
 # Archivo donde guardaremos el registro de entregables enviados
 LOG_FILE = "historial_entregas.json"
 
+import streamlit as st
+
+# Selector de empresas creadas para la gestión de auditoría y entregables
+cliente_seleccionado = st.selectbox(
+    "Seleccionar Empresa / Contribuyente:",
+    [
+        "soluciones_503",
+        "distribuidora_libertad",
+        "leftech",
+        "cedillo",
+        "mercadito_rosa"
+    ]
+)
+
+st.write(f"Trabajando actualmente con: **{cliente_seleccionado}**")
+
 def auditor_deliverables_portal():
     st.header("🔍 Panel de Auditoría: Gestión de Entregables")
     
