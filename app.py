@@ -573,8 +573,14 @@ def client_dashboard():
         
         with emp_tab_add:
             with st.form("form_add_employee"):
-                new_emp_name = st.text_input("Nombre Completo del Empleado")
-                new_emp_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, step=10.0, key="add_emp_sal")
+                col_e1, col_e2 = st.columns(2)
+                with col_e1:
+                    new_emp_name = st.text_input("Nombre Completo del Empleado")
+                    new_emp_dui = st.text_input("DUI del Empleado (ej. 00000000-0)")
+                with col_e2:
+                    new_emp_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, step=10.0, key="add_emp_sal")
+                    new_emp_codigo = st.selectbox("Clasificación / Código de Renta", ["Código 01 (Sueldos y Salarios / Tabla)", "Código 60 (Otras Retenciones / Servicios)"], key="add_emp_cod")
+                
                 submit_add_emp = st.form_submit_button("Cargar Empleado al Sistema", use_container_width=True)
                 
                 if submit_add_emp:
@@ -583,10 +589,12 @@ def client_dashboard():
                             st.session_state.employees_db[current_user_id] = []
                         st.session_state.employees_db[current_user_id].append({
                             "nombre": new_emp_name.strip(),
+                            "dui": new_emp_dui.strip(),
+                            "codigo": new_emp_codigo,
                             "salario": new_emp_salario
                         })
                         save_json_db(EMPLOYEES_FILE, st.session_state.employees_db)
-                        st.success(f"¡Empleado **{new_emp_name.strip()}** cargado al sistema exitosamente y guardado en base fija!")
+                        st.success(f"¡Empleado **{new_emp_name.strip()}** cargado al sistema exitosamente con su DUI y código de renta!")
                         st.rerun()
                     else:
                         st.warning("Por favor ingresa el nombre del empleado.")
@@ -596,9 +604,13 @@ def client_dashboard():
             emps = st.session_state.employees_db.get(current_user_id, [])
             if emps:
                 for idx, emp in enumerate(emps):
-                    with st.expander(f"👤 {emp['nombre']} — Salario Base: ${emp['salario']:,.2f}"):
+                    dui_txt = f" — DUI: {emp.get('dui', 'N/A')}" if emp.get('dui') else ""
+                    cod_txt = f" | {emp.get('codigo', 'Código 01')}"
+                    with st.expander(f"👤 {emp['nombre']}{dui_txt}{cod_txt} — Salario: ${emp['salario']:,.2f}"):
                         with st.form(f"edit_delete_emp_{idx}"):
                             ed_name = st.text_input("Editar Nombre", value=emp['nombre'], key=f"ed_name_{idx}")
+                            ed_dui = st.text_input("Editar DUI", value=emp.get('dui', ''), key=f"ed_dui_{idx}")
+                            ed_codigo = st.selectbox("Editar Código de Renta", ["Código 01 (Sueldos y Salarios / Tabla)", "Código 60 (Otras Retenciones / Servicios)"], index=0 if "01" in emp.get('codigo', '') else 1, key=f"ed_cod_{idx}")
                             ed_salario = st.number_input("Editar Salario Base Mensual ($)", min_value=0.0, step=10.0, value=float(emp['salario']), key=f"ed_sal_{idx}")
                             
                             col_btn1, col_btn2 = st.columns(2)
@@ -608,6 +620,8 @@ def client_dashboard():
                             if update_btn:
                                 st.session_state.employees_db[current_user_id][idx] = {
                                     "nombre": ed_name.strip(),
+                                    "dui": ed_dui.strip(),
+                                    "codigo": ed_codigo,
                                     "salario": ed_salario
                                 }
                                 save_json_db(EMPLOYEES_FILE, st.session_state.employees_db)
@@ -629,12 +643,15 @@ def client_dashboard():
                 
                 if emp_names:
                     selected_emp_name = st.selectbox("Seleccionar Empleado Registrado", emp_names)
-                    selected_emp_obj = next((e for e in emps if e["nombre"] == selected_emp_name), {"salario": 0.0})
+                    selected_emp_obj = next((e for e in emps if e["nombre"] == selected_emp_name), {"salario": 0.0, "codigo": "Código 01"})
                     default_sal = selected_emp_obj["salario"]
+                    default_cod = selected_emp_obj.get("codigo", "Código 01")
                 else:
                     selected_emp_name = st.text_input("Nombre del Empleado Quincenal")
                     default_sal = 0.0
+                    default_cod = "Código 01"
                     
+                st.markdown(f"**Código de Retención Asignado:** {default_cod}")
                 q_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, value=default_sal, step=10.0, key="q_sal")
                 q_bono = st.number_input("Bonificaciones / Otros Ingresos ($)", min_value=0.0, step=5.0, key="q_bono")
                 
@@ -642,9 +659,8 @@ def client_dashboard():
                 if btn_q:
                     base_quincenal = (q_salario / 2.0) + q_bono
                     target_name = selected_emp_name if emp_names else (selected_emp_name or 'Empleado')
-                    st.success(f"Resultado para {target_name} ({quincena_op}):")
+                    st.success(f"Resultado para {target_name} ({quincena_op}) — [{default_cod}]:")
                     st.metric("Total Devengado Quincenal", f"${base_quincenal:,.2f}")
-
     with client_tab3:
         st.subheader("📊 Historial de Declaraciones, Resumen Ejecutivo de IVA y Trazabilidad DTE")
         
