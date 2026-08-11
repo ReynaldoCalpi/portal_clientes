@@ -7,7 +7,7 @@ def admin_file_uploader():
     st.header("📤 Portal de Carga: Entregables de Auditoría")
     
     # Lista de clientes (puedes cargar esto desde una DB o archivo de configuración)
-    clientes = ["Empresa_A", "Empresa_B", "Transportes_Calpi"] # Ejemplo
+    clientes = ["soluciones_503", "distribuidora_libertad", "leftech","mercadito_rosa", "cedillos"] # Ejemplo
     cliente_seleccionado = st.selectbox("Seleccionar Cliente:", clientes)
     
     with st.form("uploader_form", clear_on_submit=True):
