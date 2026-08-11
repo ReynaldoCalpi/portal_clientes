@@ -37,7 +37,7 @@ def auditor_deliverables_portal():
             with col2:
                 tipo = st.selectbox(
                     "Tipo de Entregable", 
-                    ["Libros de Ventas", "Libros de Compras", "Planillas", "Declaraciones", "Anexos Financieros", "Dictamen Fiscal"]
+                    ["Anexos de Declaraciones y Otros"]
                 )
                 fecha = st.date_input("Fecha de emisión")
             
