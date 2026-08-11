@@ -554,51 +554,13 @@ def client_dashboard():
                 else:
                     st.warning("Adjunta al menos un archivo JSON principal antes de enviar.")
 
-        with client_tab2:
+    with client_tab2:
         st.subheader("💼 MANTENIMIENTO DE PERSONAL Y PLANILLA QUINCENAL")
         
         if current_user_id not in st.session_state.employees_db:
             st.session_state.employees_db[current_user_id] = []
             
-        emp_tab_add, emp_tab_manage, emp_tab_calc, doc_tab_delivery = st.tabs(["➕ Cargar Empleado", "✏️ Editar / Borrar Empleados", "🗂️ Cálculo de Planilla", "📁 Documentos Entregables"])
-
-      # Asegúrate de que este 'with' comience exactamente a la misma 
-    # distancia del margen izquierdo que los 'with' de las otras pestañas:
-        with doc_tab_delivery:
-        st.subheader("📁 Documentos Entregables para el Cliente")
-        
-        base_dir = "documentos_finales"
-        user_dir = os.path.join(base_dir, current_user_id)
-        if not os.path.exists(user_dir):
-            os.makedirs(user_dir)
-
-        if current_user_id == "ADMIN_ID_O_TU_EMAIL": 
-            st.write("### Cargar Documentos Finales")
-            uploaded_doc = st.file_uploader("Selecciona el libro o declaración a entregar", type=['pdf', 'xlsx', 'json'])
-            
-            if uploaded_doc is not None:
-                if st.button("Publicar documento para el cliente"):
-                    save_path = os.path.join(user_dir, uploaded_doc.name)
-                    with open(save_path, "wb") as f:
-                        f.write(uploaded_doc.getbuffer())
-                    st.success(f"Documento '{uploaded_doc.name}' publicado con éxito.")
-                    st.rerun()
-
-        st.write("### Archivos Disponibles para Descarga")
-        files = os.listdir(user_dir)
-        
-        if files:
-            for file_name in files:
-                file_path = os.path.join(user_dir, file_name)
-                with open(file_path, "rb") as file:
-                    st.download_button(
-                        label=f"📥 Descargar {file_name}",
-                        data=file,
-                        file_name=file_name,
-                        mime="application/octet-stream"
-                    )
-        else:
-            st.info("No hay documentos entregables disponibles por el momento.")
+        emp_tab_add, emp_tab_manage, emp_tab_calc = st.tabs(["➕ Cargar Empleado", "✏️ Editar / Borrar Empleados", "🧮 Cálculo de Planilla"])
         
         with emp_tab_add:
             with st.form("form_add_employee"):
