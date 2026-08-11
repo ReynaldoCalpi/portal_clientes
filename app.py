@@ -9,6 +9,22 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
+from auditor_module import auditor_deliverables_portal  # Importas tu módulo
+
+def main():
+    st.sidebar.title("🔐 Acceso al Sistema")
+    rol = st.sidebar.radio("Seleccionar Portal:", ["Portal del Contribuyente", "Portal de Auditoría"])
+    
+    if rol == "Portal del Contribuyente":
+        # Tu lógica de cliente actual
+        st.write("Vista de cliente...")
+    else:
+        # Llamas a la función del módulo externo
+        auditor_deliverables_portal()
+
+if __name__ == "__main__":
+    main()
+
 # Configuración de la página
 st.set_page_config(
     page_title="Portal de Contribuyente - RI Consultores",
