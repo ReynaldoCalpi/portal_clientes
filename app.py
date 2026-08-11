@@ -9,23 +9,11 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-from auditor_module import auditor_deliverables_portal  # Importas tu módulo
+# --- Importación de Módulos Externos ---
+from auditor_module import auditor_deliverables_portal
+from admin_uploader_module import admin_file_uploader
 
-def main():
-    st.sidebar.title("🔐 Acceso al Sistema")
-    rol = st.sidebar.radio("Seleccionar Portal:", ["Portal del Contribuyente", "Portal de Auditoría"])
-    
-    if rol == "Portal del Contribuyente":
-        # Tu lógica de cliente actual
-        st.write("Vista de cliente...")
-    else:
-        # Pasamos el nombre del usuario logueado al portal de auditoría
-        auditor_deliverables_portal(st.session_state.username)
-
-if __name__ == "__main__":
-    main()
-
-# Configuración de la página
+# --- Configuración Inicial de la Página (Debe ser la primera orden de Streamlit) ---
 st.set_page_config(
     page_title="Portal de Contribuyente - RI Consultores",
     page_icon="📊",
@@ -104,7 +92,6 @@ def create_zip_buffer(json_list, pdf_list):
     return zip_buffer.getvalue()
 
 def extract_invoice_summary(file_list):
-    """Extrae el Código de Generación, Número de Control (DTE-03), valor, iva y total con validación robusta y ecuaciones cruzadas."""
     summary_data = []
     if not file_list:
         return pd.DataFrame()
@@ -255,7 +242,7 @@ def login_screen():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.title("🔐 RI Consultores")
-        st.markdown("### Portal de Gestión Documental")
+        st.markdown("### Portal de Gestión Documental y Auditoría")
         
         with st.form("login_form"):
             username = st.text_input("Usuario")
@@ -276,9 +263,10 @@ def login_screen():
 # --- Panel de Administración ---
 def admin_dashboard():
     st.title("🎛️ Panel de Control - Administrador")
-    st.markdown("Supervisa el cumplimiento fiscal, administra cuentas y revisa los documentos cargados en tiempo real.")
+    st.markdown("Supervisa el cumplimiento fiscal, administra cuentas, revisa los documentos cargados y gestiona entregables de auditoría.")
     
-    tab1, tab2, tab3 = st.tabs(["📋 Estatus y Archivos Recibidos", "➕ Crear Nuevo Usuario", "👥 Listado de Cuentas"])
+    # Añadimos la pestaña para cargar entregables al panel del Admin
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 Estatus y Archivos Recibidos", "📤 Cargar Entregables de Auditoría", "➕ Crear Nuevo Usuario", "👥 Listado de Cuentas"])
     
     with tab1:
         st.subheader("Control de Recepción y Descarga de Documentos y Planillas")
@@ -434,6 +422,10 @@ def admin_dashboard():
             st.info(f"No hay documentos ni planillas registrados para el periodo {periodo_seleccionado} todavía.")
 
     with tab2:
+        # Aquí integramos la función del uploader para el admin
+        admin_file_uploader()
+
+    with tab3:
         st.subheader("Dar de alta a un nuevo cliente")
         with st.form("new_client_form"):
             new_user_id = st.text_input("Identificador único de usuario (ej. empresa_abc)").strip().lower()
@@ -455,7 +447,7 @@ def admin_dashboard():
                 else:
                     st.warning("Completa todos los campos.")
 
-    with tab3:
+    with tab4:
         st.subheader("Cuentas de Clientes Activas")
         client_accounts = [{"Usuario ID": k, "Nombre": v["name"]} for k, v in st.session_state.clients_db.items() if v["role"] == "client"]
         if client_accounts:
@@ -463,10 +455,10 @@ def admin_dashboard():
         else:
             st.warning("No hay clientes registrados.")
 
-# --- Panel del Cliente con las Pestañas Principales Solicitadas ---
+# --- Panel del Cliente con Pestañas y Portal de Auditoría ---
 def client_dashboard():
     st.title(f"📁 PORTAL DE CONTRIBUYENTE — {st.session_state.username}")
-    st.markdown("Gestión documental, notas aclaratorias y generación de planillas fiscales.")
+    st.markdown("Gestión documental, notas aclaratorias, generación de planillas fiscales y portal de auditoría.")
     
     col_p1, col_p2, col_p3 = st.columns(3)
     with col_p1:
@@ -491,12 +483,13 @@ def client_dashboard():
         
     st.divider()
     
-    # --- PESTAÑAS PRINCIPALES DEL PORTAL ---
-    client_tab1, client_tab2, client_tab3, client_tab4 = st.tabs([
+    # --- PESTAÑAS PRINCIPALES DEL CLIENTE (Incluyendo Portal de Auditoría) ---
+    client_tab1, client_tab2, client_tab3, client_tab4, client_tab5 = st.tabs([
         "📁 CARGA DOCUMENTAL Y NOTAS", 
         "💼 GENERADOR DE PLANILLAS", 
         "📊 HISTORIAL Y RESUMEN",
-        "🧾 BASE Y PLANILLA DE EVENTUALES (10%)"
+        "🧾 BASE Y PLANILLA DE EVENTUALES (10%)",
+        "🔍 ENTREGABLES DE AUDITORÍA"
     ])
     
     with client_tab1:
@@ -887,7 +880,6 @@ def client_dashboard():
                             use_container_width=True
                         )
                         
-                        # Generación de Excel con formato profesional
                         output = io.BytesIO()
                         total_row_df = pd.DataFrame([{
                             "Prestador Eventual": "TOTALES GENERALES",
@@ -999,7 +991,11 @@ def client_dashboard():
             else:
                 st.warning("⚠️ Tu Base Maestro está vacía. Ve a la pestaña **'Directorio Maestro (Base Fija)'** para registrar a tus prestadores eventuales por primera vez.")
 
-# --- Control de Sesión ---
+    with client_tab5:
+        # Aquí integramos la visualización de los archivos que el administrador sube para este cliente
+        auditor_deliverables_portal(st.session_state.username)
+
+# --- Control de Sesión y Redirección Principal ---
 if not st.session_state.logged_in:
     login_screen()
 else:
