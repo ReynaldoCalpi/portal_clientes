@@ -554,7 +554,7 @@ def client_dashboard():
                 else:
                     st.warning("Adjunta al menos un archivo JSON principal antes de enviar.")
 
-    with client_tab2:
+        with client_tab2:
         st.subheader("💼 MANTENIMIENTO DE PERSONAL Y PLANILLA QUINCENAL")
         
         if current_user_id not in st.session_state.employees_db:
@@ -562,16 +562,16 @@ def client_dashboard():
             
         emp_tab_add, emp_tab_manage, emp_tab_calc, doc_tab_delivery = st.tabs(["➕ Cargar Empleado", "✏️ Editar / Borrar Empleados", "🗂️ Cálculo de Planilla", "📁 Documentos Entregables"])
 
-       with doc_tab_delivery:
+      # Asegúrate de que este 'with' comience exactamente a la misma 
+    # distancia del margen izquierdo que los 'with' de las otras pestañas:
+        with doc_tab_delivery:
         st.subheader("📁 Documentos Entregables para el Cliente")
         
-        # Directorio donde se guardarán los archivos
         base_dir = "documentos_finales"
         user_dir = os.path.join(base_dir, current_user_id)
         if not os.path.exists(user_dir):
             os.makedirs(user_dir)
 
-        # --- Lógica para el ADMIN ---
         if current_user_id == "ADMIN_ID_O_TU_EMAIL": 
             st.write("### Cargar Documentos Finales")
             uploaded_doc = st.file_uploader("Selecciona el libro o declaración a entregar", type=['pdf', 'xlsx', 'json'])
@@ -584,7 +584,6 @@ def client_dashboard():
                     st.success(f"Documento '{uploaded_doc.name}' publicado con éxito.")
                     st.rerun()
 
-        # --- Lógica para el CLIENTE ---
         st.write("### Archivos Disponibles para Descarga")
         files = os.listdir(user_dir)
         
