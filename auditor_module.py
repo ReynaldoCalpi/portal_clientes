@@ -22,7 +22,7 @@ def auditor_deliverables_portal():
                 periodo = st.text_input("Periodo Fiscal (ej. 2026)")
             with col2:
                 tipo = st.selectbox("Tipo de Entregable", 
-                                    ["Dictamen Fiscal", "Anexos Financieros", "Papeles de Trabajo", "Cédulas de Ajuste"])
+                                    ["Libros de Ventas", "Libros de Compras", "Planillas", "Declaraciones"])
                 fecha = st.date_input("Fecha de emisión")
             
             archivos = st.file_uploader("Adjuntar archivos", accept_multiple_files=True)
