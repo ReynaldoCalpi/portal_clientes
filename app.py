@@ -91,6 +91,28 @@ def create_zip_buffer(json_list, pdf_list):
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
 
+# --- Funciones de Cálculo de Ley (El Salvador) ---
+def calcular_isss_quincenal(sueldo_base_q):
+    # ISSS: 3% con techo de $500 quincenal ($1,000 mensual)
+    base = min(sueldo_base_q, 500.0)
+    return round(base * 0.03, 2)
+
+def calcular_afp_quincenal(sueldo_base_q):
+    # AFP: 7.25% sobre el sueldo base quincenal
+    return round(sueldo_base_q * 0.0725, 2)
+
+def calcular_renta_quincenal(sueldo_neto_isss_afp):
+    # Tramos de Renta Quincenal (El Salvador)
+    b = sueldo_neto_isss_afp
+    if b <= 236.00:
+        return 0.0
+    elif b <= 447.62:
+        return round((b - 236.00) * 0.10 + 8.83, 2)
+    elif b <= 1019.05:
+        return round((b - 447.63) * 0.20 + 30.00, 2)
+    else:
+        return round((b - 1019.05) * 0.30 + 144.28, 2)
+
 def extract_invoice_summary(file_list):
     summary_data = []
     if not file_list:
@@ -265,7 +287,6 @@ def admin_dashboard():
     st.title("🎛️ Panel de Control - Administrador")
     st.markdown("Supervisa el cumplimiento fiscal, administra cuentas, revisa los documentos cargados y gestiona entregables de auditoría.")
     
-    # Añadimos la pestaña para cargar entregables al panel del Admin
     tab1, tab2, tab3, tab4 = st.tabs(["📋 Estatus y Archivos Recibidos", "📤 Cargar Entregables de Auditoría", "➕ Crear Nuevo Usuario", "👥 Listado de Cuentas"])
     
     with tab1:
@@ -284,7 +305,110 @@ def admin_dashboard():
         if envios_periodo:
             st.success(f"Se encontraron {len(envios_periodo)} registros/entregas para el periodo {periodo_seleccionado}.")
             for idx, envio in enumerate(envios_periodo):
-                if envio.get("type") == "planilla_eventuales":
+                if envio.get("type") == "planilla_quincenal_empleados":
+                    with st.expander(f"💼 [PLANILLA QUINCENAL SUELDOS] {envio['client']} — ({envio.get('quincena', 'Quincena')}) — Entregado el {envio['fecha']}"):
+                        st.markdown(f"**Periodo Fiscal:** {envio['periodo']} | **Quincena:** {envio.get('quincena', 'N/A')}")
+                        st.markdown(f"**Resumen Consolidado:** Total Devengado: **${envio['total_devengado']:,.2f}** | ISSS: **${envio['total_isss']:,.2f}** | AFP: **${envio['total_afp']:,.2f}** | RENTA: **${envio['total_renta']:,.2f}** | Líquido a Pagar: **${envio['total_liquido']:,.2f}**")
+                        
+                        df_pq_admin = pd.DataFrame(envio['data'])
+                        output_pq_adm = io.BytesIO()
+                        total_row_pq_adm = pd.DataFrame([{
+                            "Empleado": "TOTALES GENERALES",
+                            "DUI": "",
+                            "Código Renta": "",
+                            "Salario Base M.": 0.0,
+                            "Bonif. / Ingresos": 0.0,
+                            "Total Devengado Q.": envio['total_devengado'],
+                            "ISSS": envio['total_isss'],
+                            "AFP": envio['total_afp'],
+                            "RENTA": envio['total_renta'],
+                            "Líquido a Pagar": envio['total_liquido']
+                        }])
+                        df_exp_pq_adm = pd.concat([df_pq_admin, total_row_pq_adm], ignore_index=True)
+                        
+                        with pd.ExcelWriter(output_pq_adm, engine='openpyxl') as writer:
+                            df_exp_pq_adm.to_excel(writer, index=False, sheet_name='Planilla Quincenal', startrow=4)
+                            workbook = writer.book
+                            worksheet = writer.sheets['Planilla Quincenal']
+                            
+                            worksheet['A1'] = f"RI CONSULTORES — PLANILLA DE SUELDOS QUINCENAL ({envio.get('quincena', '').upper()})"
+                            worksheet['A2'] = f"Periodo Fiscal: {envio['periodo']}"
+                            worksheet['A3'] = f"Cliente / Contribuyente: {envio['client']}"
+                            
+                            title_font = Font(name='Calibri', size=12, bold=True, color='1F4E78')
+                            subtitle_font = Font(name='Calibri', size=10, bold=True, color='595959')
+                            header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
+                            header_fill = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')
+                            total_font = Font(name='Calibri', size=11, bold=True, color='000000')
+                            total_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
+                            
+                            align_center = Alignment(horizontal='center', vertical='center')
+                            align_right = Alignment(horizontal='right', vertical='center')
+                            align_left = Alignment(horizontal='left', vertical='center')
+                            
+                            thin_border = Border(
+                                left=Side(style='thin', color='D3D3D3'), right=Side(style='thin', color='D3D3D3'),
+                                top=Side(style='thin', color='D3D3D3'), bottom=Side(style='thin', color='D3D3D3')
+                            )
+                            thick_bottom_border = Border(
+                                left=Side(style='thin', color='D3D3D3'), right=Side(style='thin', color='D3D3D3'),
+                                top=Side(style='thin', color='D3D3D3'), bottom=Side(style='double', color='000000')
+                            )
+                            
+                            worksheet['A1'].font = title_font
+                            worksheet['A2'].font = subtitle_font
+                            worksheet['A3'].font = subtitle_font
+                            
+                            header_row_idx = 5
+                            for col_num in range(1, len(df_exp_pq_adm.columns) + 1):
+                                cell = worksheet.cell(row=header_row_idx, column=col_num)
+                                cell.font = header_font
+                                cell.fill = header_fill
+                                cell.alignment = align_center
+                                cell.border = thin_border
+                                
+                            total_row_idx = header_row_idx + len(df_exp_pq_adm)
+                            for row_idx in range(header_row_idx + 1, total_row_idx + 1):
+                                is_total_row = (row_idx == total_row_idx)
+                                for col_idx in range(1, len(df_exp_pq_adm.columns) + 1):
+                                    cell = worksheet.cell(row=row_idx, column=col_idx)
+                                    if is_total_row:
+                                        cell.font = total_font
+                                        cell.fill = total_fill
+                                        cell.border = thick_bottom_border
+                                    else:
+                                        cell.border = thin_border
+                                        
+                                    if col_idx >= 4:
+                                        cell.number_format = '$#,##0.00'
+                                        cell.alignment = align_right
+                                    elif col_idx in [2, 3]:
+                                        cell.alignment = align_center
+                                    else:
+                                        cell.alignment = align_left
+                                        
+                            for col in worksheet.columns:
+                                max_len = 0
+                                for cell in col:
+                                    if cell.row >= 5:
+                                        val_str = str(cell.value or '')
+                                        if len(val_str) > max_len:
+                                            max_len = len(val_str)
+                                col_letter = get_column_letter(col[0].column)
+                                worksheet.column_dimensions[col_letter].width = max(max_len + 4, 18)
+                                
+                        excel_pq_adm_data = output_pq_adm.getvalue()
+                        safe_c_name = envio['client'].replace(" ", "_").replace(".", "")
+                        
+                        st.download_button(
+                            label="📥 Descargar Planilla Quincenal del Cliente (Excel)",
+                            data=excel_pq_adm_data,
+                            file_name=f"Planilla_Quincenal_{safe_c_name}_{envio['periodo'].replace(' ', '_')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"dl_adm_pq_{idx}"
+                        )
+
+                elif envio.get("type") == "planilla_eventuales":
                     with st.expander(f"🧾 [PLANILLA EVENTUALES] {envio['client']} — Entregado el {envio['fecha']}"):
                         st.markdown(f"**Periodo Fiscal:** {envio['periodo']}")
                         st.markdown(f"**Resumen Consolidado:** Total Bruto: **${envio['total_bruto']:,.2f}** | Retención 10%: **${envio['total_retencion']:,.2f}** | Líquido a Pagar: **${envio['total_liquido']:,.2f}**")
@@ -422,7 +546,6 @@ def admin_dashboard():
             st.info(f"No hay documentos ni planillas registrados para el periodo {periodo_seleccionado} todavía.")
 
     with tab2:
-        # Aquí integramos la función del uploader para el admin
         admin_file_uploader()
 
     with tab3:
@@ -473,7 +596,7 @@ def client_dashboard():
     current_user_id = st.session_state.get("user_id", st.session_state.username)
     all_submissions = load_submissions()
     mis_envios = [s for s in all_submissions if s.get("user_id") == current_user_id or s.get("client") == st.session_state.username]
-    envio_actual = next((s for s in mis_envios if s["periodo"] == periodo_str and s.get("type") != "planilla_eventuales"), None)
+    envio_actual = next((s for s in mis_envios if s["periodo"] == periodo_str and s.get("type") not in ["planilla_eventuales", "planilla_quincenal_empleados"]), None)
     
     st.markdown("### 📌 Estatus y Acciones Requeridas")
     if envio_actual:
@@ -483,7 +606,7 @@ def client_dashboard():
         
     st.divider()
     
-    # --- PESTAÑAS PRINCIPALES DEL CLIENTE (Incluyendo Portal de Auditoría) ---
+    # --- PESTAÑAS PRINCIPALES DEL CLIENTE ---
     client_tab1, client_tab2, client_tab3, client_tab4, client_tab5 = st.tabs([
         "📁 CARGA DOCUMENTAL Y NOTAS", 
         "💼 GENERADOR DE PLANILLAS", 
@@ -569,7 +692,7 @@ def client_dashboard():
         if current_user_id not in st.session_state.employees_db:
             st.session_state.employees_db[current_user_id] = []
             
-        emp_tab_add, emp_tab_manage, emp_tab_calc = st.tabs(["➕ Cargar Empleado", "✏️ Editar / Borrar Empleados", "🧮 Cálculo de Planilla"])
+        emp_tab_add, emp_tab_manage, emp_tab_calc = st.tabs(["➕ Cargar Empleado", "✏️ Editar / Borrar Empleados", "🧮 Cálculo Masivo de Planilla"])
         
         with emp_tab_add:
             with st.form("form_add_employee"):
@@ -637,37 +760,255 @@ def client_dashboard():
                 st.info("No hay empleados cargados en el sistema todavía.")
                 
         with emp_tab_calc:
-            with st.form("form_planilla_quincenal"):
-                emps = st.session_state.employees_db.get(current_user_id, [])
-                emp_names = [e["nombre"] for e in emps] if emps else []
-                
-                if emp_names:
-                    selected_emp_name = st.selectbox("Seleccionar Empleado Registrado", emp_names)
-                    selected_emp_obj = next((e for e in emps if e["nombre"] == selected_emp_name), {"salario": 0.0, "codigo": "Código 01"})
-                    default_sal = selected_emp_obj["salario"]
-                    default_cod = selected_emp_obj.get("codigo", "Código 01")
-                else:
-                    selected_emp_name = st.text_input("Nombre del Empleado Quincenal")
-                    default_sal = 0.0
-                    default_cod = "Código 01"
+            st.markdown(f"##### 🧮 Cálculo Masivo de Planilla Quincenal — **{periodo_str}** ({quincena_op})")
+            st.info("ℹ️ Aquí puedes ingresar las bonificaciones u otros ingresos extraordinarios para cada empleado. El sistema calculará automáticamente el sueldo quincenal, ISSS, AFP y Renta para todo el personal de forma simultánea.")
+            
+            emps_calc = st.session_state.employees_db.get(current_user_id, [])
+            
+            if emps_calc:
+                with st.form("form_calc_all_employees_quincenal"):
+                    updated_emp_inputs = []
+                    for idx, emp in enumerate(emps_calc):
+                        st.markdown(f"**👤 {emp['nombre']}** (DUI: {emp.get('dui', 'N/A')} | {emp.get('codigo', 'Código 01')})")
+                        col_q1, col_q2 = st.columns(2)
+                        with col_q1:
+                            salario_base_mensual = emp['salario']
+                            st.text(f"Salario Base Mensual: ${salario_base_mensual:,.2f}")
+                        with col_q2:
+                            bono_val = st.number_input(
+                                f"Bonificaciones / Otros Ingresos ($)", 
+                                min_value=0.0, 
+                                value=0.0, 
+                                step=5.0, 
+                                key=f"q_bono_{idx}"
+                            )
+                        st.divider()
+                        updated_emp_inputs.append({
+                            "nombre": emp['nombre'],
+                            "dui": emp.get('dui', 'N/A'),
+                            "codigo": emp.get('codigo', 'Código 01'),
+                            "salario_mensual": salario_base_mensual,
+                            "bonificacion": bono_val
+                        })
                     
-                st.markdown(f"**Código de Retención Asignado:** {default_cod}")
-                q_salario = st.number_input("Salario Base Mensual ($)", min_value=0.0, value=default_sal, step=10.0, key="q_sal")
-                q_bono = st.number_input("Bonificaciones / Otros Ingresos ($)", min_value=0.0, step=5.0, key="q_bono")
+                    btn_calc_all_emps = st.form_submit_button("🚀 Calcular Planilla Preliminar Completa", use_container_width=True)
+                    
+                if btn_calc_all_emps:
+                    planilla_q_data = []
+                    tot_devengado = 0.0
+                    tot_isss = 0.0
+                    tot_afp = 0.0
+                    tot_renta = 0.0
+                    tot_liquido = 0.0
+                    
+                    for item in updated_emp_inputs:
+                        sueldo_base_q = item['salario_mensual'] / 2.0
+                        devengado_q = sueldo_base_q + item['bonificacion']
+                        
+                        isss_q = 0.0
+                        afp_q = 0.0
+                        renta_q = 0.0
+                        
+                        if "01" in item['codigo']:
+                            isss_q = calcular_isss_quincenal(devengado_q)
+                            afp_q = calcular_afp_quincenal(devengado_q)
+                            neto_gravable = devengado_q - isss_q - afp_q
+                            renta_q = calcular_renta_quincenal(neto_gravable)
+                        else: # Código 60
+                            renta_q = round(devengado_q * 0.10, 2)
+                            
+                        liquido_q = round(devengado_q - isss_q - afp_q - renta_q, 2)
+                        
+                        tot_devengado += devengado_q
+                        tot_isss += isss_q
+                        tot_afp += afp_q
+                        tot_renta += renta_q
+                        tot_liquido += liquido_q
+                        
+                        planilla_q_data.append({
+                            "Empleado": item['nombre'],
+                            "DUI": item['dui'],
+                            "Código Renta": item['codigo'],
+                            "Salario Base M.": item['salario_mensual'],
+                            "Bonif. / Ingresos": item['bonificacion'],
+                            "Total Devengado Q.": devengado_q,
+                            "ISSS": isss_q,
+                            "AFP": afp_q,
+                            "RENTA": renta_q,
+                            "Líquido a Pagar": liquido_q
+                        })
+                    
+                    st.session_state["temp_planilla_quincenal"] = {
+                        "periodo": periodo_str,
+                        "quincena": quincena_op,
+                        "data": planilla_q_data,
+                        "total_devengado": tot_devengado,
+                        "total_isss": tot_isss,
+                        "total_afp": tot_afp,
+                        "total_renta": tot_renta,
+                        "total_liquido": tot_liquido
+                    }
+                    st.success("¡Planilla quincenal preliminar calculada con éxito para todo el personal!")
+                    st.rerun()
                 
-                btn_q = st.form_submit_button("Calcular Quincena", use_container_width=True)
-                if btn_q:
-                    base_quincenal = (q_salario / 2.0) + q_bono
-                    target_name = selected_emp_name if emp_names else (selected_emp_name or 'Empleado')
-                    st.success(f"Resultado para {target_name} ({quincena_op}) — [{default_cod}]:")
-                    st.metric("Total Devengado Quincenal", f"${base_quincenal:,.2f}")
+                if "temp_planilla_quincenal" in st.session_state:
+                    pq_info = st.session_state["temp_planilla_quincenal"]
+                    if pq_info["periodo"] == periodo_str:
+                        st.markdown("---")
+                        st.markdown("### 📋 Vista Preliminar de Planilla Quincenal")
+                        df_pq = pd.DataFrame(pq_info["data"])
+                        
+                        col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
+                        col_m1.metric("Total Devengado", f"${pq_info['total_devengado']:,.2f}")
+                        col_m2.metric("Total ISSS", f"${pq_info['total_isss']:,.2f}")
+                        col_m3.metric("Total AFP", f"${pq_info['total_afp']:,.2f}")
+                        col_m4.metric("Total RENTA", f"${pq_info['total_renta']:,.2f}")
+                        col_m5.metric("Líquido a Pagar", f"${pq_info['total_liquido']:,.2f}")
+                        
+                        st.dataframe(
+                            df_pq.style.format({
+                                "Salario Base M.": "${:,.2f}",
+                                "Bonif. / Ingresos": "${:,.2f}",
+                                "Total Devengado Q.": "${:,.2f}",
+                                "ISSS": "${:,.2f}",
+                                "AFP": "${:,.2f}",
+                                "RENTA": "${:,.2f}",
+                                "Líquido a Pagar": "${:,.2f}"
+                            }),
+                            use_container_width=True
+                        )
+                        
+                        # Generador de Excel Profesional para descarga
+                        output_pq = io.BytesIO()
+                        total_row_pq = pd.DataFrame([{
+                            "Empleado": "TOTALES GENERALES",
+                            "DUI": "",
+                            "Código Renta": "",
+                            "Salario Base M.": 0.0,
+                            "Bonif. / Ingresos": 0.0,
+                            "Total Devengado Q.": pq_info['total_devengado'],
+                            "ISSS": pq_info['total_isss'],
+                            "AFP": pq_info['total_afp'],
+                            "RENTA": pq_info['total_renta'],
+                            "Líquido a Pagar": pq_info['total_liquido']
+                        }])
+                        df_exp_pq = pd.concat([df_pq, total_row_pq], ignore_index=True)
+                        
+                        with pd.ExcelWriter(output_pq, engine='openpyxl') as writer:
+                            df_exp_pq.to_excel(writer, index=False, sheet_name='Planilla Quincenal', startrow=4)
+                            workbook = writer.book
+                            worksheet = writer.sheets['Planilla Quincenal']
+                            
+                            worksheet['A1'] = f"RI CONSULTORES — PLANILLA DE SUELDOS QUINCENAL ({quincena_op.upper()})"
+                            worksheet['A2'] = f"Periodo Fiscal: {periodo_str}"
+                            worksheet['A3'] = f"Cliente / Contribuyente: {st.session_state.username}"
+                            
+                            title_font = Font(name='Calibri', size=12, bold=True, color='1F4E78')
+                            subtitle_font = Font(name='Calibri', size=10, bold=True, color='595959')
+                            header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
+                            header_fill = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')
+                            total_font = Font(name='Calibri', size=11, bold=True, color='000000')
+                            total_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
+                            
+                            align_center = Alignment(horizontal='center', vertical='center')
+                            align_right = Alignment(horizontal='right', vertical='center')
+                            align_left = Alignment(horizontal='left', vertical='center')
+                            
+                            thin_border = Border(
+                                left=Side(style='thin', color='D3D3D3'), right=Side(style='thin', color='D3D3D3'),
+                                top=Side(style='thin', color='D3D3D3'), bottom=Side(style='thin', color='D3D3D3')
+                            )
+                            thick_bottom_border = Border(
+                                left=Side(style='thin', color='D3D3D3'), right=Side(style='thin', color='D3D3D3'),
+                                top=Side(style='thin', color='D3D3D3'), bottom=Side(style='double', color='000000')
+                            )
+                            
+                            worksheet['A1'].font = title_font
+                            worksheet['A2'].font = subtitle_font
+                            worksheet['A3'].font = subtitle_font
+                            
+                            header_row_idx = 5
+                            for col_num in range(1, len(df_exp_pq.columns) + 1):
+                                cell = worksheet.cell(row=header_row_idx, column=col_num)
+                                cell.font = header_font
+                                cell.fill = header_fill
+                                cell.alignment = align_center
+                                cell.border = thin_border
+                                
+                            total_row_idx = header_row_idx + len(df_exp_pq)
+                            for row_idx in range(header_row_idx + 1, total_row_idx + 1):
+                                is_total_row = (row_idx == total_row_idx)
+                                for col_idx in range(1, len(df_exp_pq.columns) + 1):
+                                    cell = worksheet.cell(row=row_idx, column=col_idx)
+                                    if is_total_row:
+                                        cell.font = total_font
+                                        cell.fill = total_fill
+                                        cell.border = thick_bottom_border
+                                    else:
+                                        cell.border = thin_border
+                                        
+                                    if col_idx >= 4:
+                                        cell.number_format = '$#,##0.00'
+                                        cell.alignment = align_right
+                                    elif col_idx in [2, 3]:
+                                        cell.alignment = align_center
+                                    else:
+                                        cell.alignment = align_left
+                                        
+                            for col in worksheet.columns:
+                                max_len = 0
+                                for cell in col:
+                                    if cell.row >= 5:
+                                        val_str = str(cell.value or '')
+                                        if len(val_str) > max_len:
+                                            max_len = len(val_str)
+                                col_letter = get_column_letter(col[0].column)
+                                worksheet.column_dimensions[col_letter].width = max(max_len + 4, 18)
+                                
+                        excel_pq_bytes = output_pq.getvalue()
+                        safe_c_name = st.session_state.username.replace(" ", "_").replace(".", "")
+                        
+                        st.download_button(
+                            label="📥 Descargar Planilla Quincenal en Excel (Formato Profesional)",
+                            data=excel_pq_bytes,
+                            file_name=f"Planilla_Quincenal_{safe_c_name}_{periodo_str.replace(' ', '_')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+                        
+                        col_act1, col_act2 = st.columns(2)
+                        with col_act1:
+                            if st.button("📤 Enviar Planilla Oficial a RI Consultores", use_container_width=True, type="primary"):
+                                submission_pq_record = {
+                                    "user_id": current_user_id,
+                                    "client": st.session_state.username,
+                                    "periodo": periodo_str,
+                                    "quincena": quincena_op,
+                                    "type": "planilla_quincenal_empleados",
+                                    "data": pq_info["data"],
+                                    "total_devengado": pq_info["total_devengado"],
+                                    "total_isss": pq_info["total_isss"],
+                                    "total_afp": pq_info["total_afp"],
+                                    "total_renta": pq_info["total_renta"],
+                                    "total_liquido": pq_info["total_liquido"],
+                                    "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+                                }
+                                save_submission_to_disk(submission_pq_record)
+                                st.success(f"¡Planilla quincenal del periodo {periodo_str} enviada exitosamente al administrador!")
+                        with col_act2:
+                            if st.button("🗑️ Borrar / Descartar Cálculo Preliminar", use_container_width=True):
+                                del st.session_state["temp_planilla_quincenal"]
+                                st.rerun()
+            else:
+                st.warning("⚠️ No hay empleados registrados en el sistema. Ve a la pestaña **'➕ Cargar Empleado'** para agregar personal antes de calcular la planilla.")
+
     with client_tab3:
         st.subheader("📊 Historial de Declaraciones, Resumen Ejecutivo de IVA y Trazabilidad DTE")
         
         if mis_envios:
             st.info("Visualiza el detalle de tus declaraciones, las notas enviadas, el resumen de IVA y los códigos de generación correspondientes.")
             for envio in mis_envios:
-                if envio.get("type") == "planilla_eventuales":
+                if envio.get("type") in ["planilla_eventuales", "planilla_quincenal_empleados"]:
                     continue
                 with st.expander(f"📅 Periodo: {envio['periodo']} — Entregado el {envio['fecha']}"):
                     if envio.get('notes'):
@@ -1008,7 +1349,6 @@ def client_dashboard():
                 st.warning("⚠️ Tu Base Maestro está vacía. Ve a la pestaña **'Directorio Maestro (Base Fija)'** para registrar a tus prestadores eventuales por primera vez.")
 
     with client_tab5:
-        # Aquí integramos la visualización de los archivos que el administrador sube para este cliente
         auditor_deliverables_portal(st.session_state.username)
 
 # --- Control de Sesión y Redirección Principal ---
