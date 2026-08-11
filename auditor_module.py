@@ -1,44 +1,78 @@
 import streamlit as st
-import json
 import os
+import json
+import io
+import zipfile
 
-def auditor_deliverables_portal(nombre_empresa_actual):
-    st.subheader("📥 Documentos y Entregables Recibidos de Auditoría")
+AUDITOR_DB = "auditor_deliverables_db.json"
+
+def load_auditor_db():
+    if os.path.exists(AUDITOR_DB):
+        try:
+            with open(AUDITOR_DB, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def create_zip_from_files(files_list):
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for file_info in files_list:
+            if os.path.exists(file_info['path']):
+                zip_file.write(file_info['path'], arcname=file_info['name'])
+    zip_buffer.seek(0)
+    return zip_buffer.getvalue()
+
+def auditor_deliverables_portal(current_username):
+    st.subheader("🔍 Entregables y Reportes de Auditoría")
+    st.markdown("Aquí encontrarás los documentos, declaraciones procesadas y reportes oficiales enviados por RI Consultores para ti.")
     
-    LOG_FILE = "historial_entregas.json"
+    db = load_auditor_db()
+    current_user_id = st.session_state.get("user_id", "")
     
-    if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "r") as f:
-            try:
-                historial = json.load(f)
-            except json.JSONDecodeError:
-                historial = []
-            
-        # Filtramos únicamente los registros que coincidan con la empresa actual del cliente
-        entregables_cliente = [
-            item for item in historial if item.get("cliente") == nombre_empresa_actual
-        ]
-        
-        if entregables_cliente:
-            for idx, entrega in enumerate(entregables_cliente):
-                with st.expander(f"📁 {entrega.get('tipo', 'Documento')} — Periodo: {entrega.get('periodo', 'N/A')} (Fecha: {entrega.get('fecha_emision', 'N/A')})"):
-                    st.write(f"**Notas del auditor:** {entrega.get('notas', 'Sin observaciones')}")
-                    st.markdown("**Archivos adjuntos disponibles:**")
+    # Filtro robusto que compara tanto el ID de usuario como el nombre comercial
+    mis_entregables = [
+        r for r in db 
+        if r.get("client_id") == current_user_id or 
+           r.get("client_name") == current_username or 
+           r.get("client_id") == current_username
+    ]
+    
+    if mis_entregables:
+        st.success(f"Se encontraron {len(mis_entregables)} entregables o reportes disponibles.")
+        for idx, item in enumerate(mis_entregables):
+            with st.expander(f"📁 [{item['periodo']}] {item['title']} — (Enviado el {item['fecha']})"):
+                if item.get("notes"):
+                    st.info(f"**📝 Notas del Auditor:**\n\n{item['notes']}")
                     
-                    # Mostrar enlaces de descarga
-                    for archivo in entrega.get("archivos", []):
-                        ruta_archivo = os.path.join("entregables_guardados", nombre_empresa_actual, archivo)
-                        if os.path.exists(ruta_archivo):
-                            with open(ruta_archivo, "rb") as file_to_download:
-                                st.download_button(
-                                    label=f"⬇️ Descargar {archivo}",
-                                    data=file_to_download,
-                                    file_name=archivo,
-                                    key=f"download_{nombre_empresa_actual}_{idx}_{archivo}"
-                                )
-                        else:
-                            st.warning(f"El archivo {archivo} no se encuentra disponible temporalmente en el servidor.")
-        else:
-            st.info("No tienes entregables o anexos de auditoría pendientes de descarga.")
+                files = item.get("files", [])
+                if files:
+                    st.markdown("**📂 Archivos Disponibles para Descarga:**")
+                    
+                    if len(files) > 1:
+                        zip_bytes = create_zip_from_files(files)
+                        st.download_button(
+                            label="📦 Descargar todos los archivos (ZIP)",
+                            data=zip_bytes,
+                            file_name=f"Entregables_{item['periodo'].replace(' ', '_')}.zip",
+                            mime="application/zip",
+                            key=f"dl_aud_zip_{idx}"
+                        )
+                        st.divider()
+                        
+                    for f_idx, file_info in enumerate(files):
+                        if os.path.exists(file_info['path']):
+                            with open(file_info['path'], "rb") as f_in:
+                                file_bytes = f_in.read()
+                            st.download_button(
+                                label=f"📥 Descargar: {file_info['name']}",
+                                data=file_bytes,
+                                file_name=file_info['name'],
+                                mime="application/octet-stream",
+                                key=f"dl_ind_{idx}_{f_idx}"
+                            )
+                else:
+                    st.warning("Este registro no contiene archivos adjuntos.")
     else:
-        st.info("No hay registros de entregas en el sistema.")
+        st.info("No tienes entregables de auditoría pendientes ni archivos nuevos en este momento.")
