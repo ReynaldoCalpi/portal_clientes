@@ -102,14 +102,15 @@ def calcular_afp_quincenal(sueldo_base_q):
     return round(sueldo_base_q * 0.0725, 2)
 
 def calcular_renta_quincenal(sueldo_neto_isss_afp):
-    # Tramos de Renta Quincenal (El Salvador)
+    # Tramos de Renta Quincenal (El Salvador - Vigente)
     b = sueldo_neto_isss_afp
-    if b <= 236.00:
+    if b <= 275.00:
         return 0.0
     elif b <= 447.62:
-        return round((b - 236.00) * 0.10 + 8.83, 2)
+        return round((b - 275.00) * 0.10 + 8.83, 2)
     elif b <= 1019.05:
-        return round((b - 447.63) * 0.20 + 30.00, 2)
+        # Nota: ajustado a b - 447.62 para continuidad exacta del tramo
+        return round((b - 447.62) * 0.20 + 30.00, 2)
     else:
         return round((b - 1019.05) * 0.30 + 144.28, 2)
 
@@ -809,12 +810,17 @@ def client_dashboard():
                         afp_q = 0.0
                         renta_q = 0.0
                         
-                        if "01" in item['codigo']:
+                        # Detectar automáticamente según el código guardado en el maestro
+                        codigo_emp = str(item.get('codigo', '01')).strip()
+                        
+                        if "01" in codigo_emp:
                             isss_q = calcular_isss_quincenal(devengado_q)
                             afp_q = calcular_afp_quincenal(devengado_q)
                             neto_gravable = devengado_q - isss_q - afp_q
                             renta_q = calcular_renta_quincenal(neto_gravable)
-                        else: # Código 60
+                        else: # Código 60 u otros servicios profesionales
+                            isss_q = 0.0
+                            afp_q = 0.0
                             renta_q = round(devengado_q * 0.10, 2)
                             
                         liquido_q = round(devengado_q - isss_q - afp_q - renta_q, 2)
