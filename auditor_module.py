@@ -6,39 +6,39 @@ from datetime import datetime
 # Archivo donde guardaremos el registro de entregables enviados
 LOG_FILE = "historial_entregas.json"
 
-import streamlit as st
-
-# Selector de empresas creadas para la gestión de auditoría y entregables
-cliente_seleccionado = st.selectbox(
-    "Seleccionar Empresa / Contribuyente:",
-    [
-        "soluciones_503",
-        "distribuidora_libertad",
-        "leftech",
-        "cedillo",
-        "mercadito_rosa"
-    ]
-)
-
-st.write(f"Trabajando actualmente con: **{cliente_seleccionado}**")
-
 def auditor_deliverables_portal():
     st.header("🔍 Panel de Auditoría: Gestión de Entregables")
+    
+    # Selector de empresas integrado dentro del módulo de auditoría
+    cliente_seleccionado = st.selectbox(
+        "Seleccionar Empresa / Contribuyente:",
+        [
+            "soluciones_503",
+            "distribuidora_libertad",
+            "leftech",
+            "cedillo",
+            "mercadito_rosa"
+        ]
+    )
+    
+    st.info(f"Trabajando actualmente con: **{cliente_seleccionado}**")
+    st.divider()
     
     # --- Pestañas para organizar el flujo ---
     tab1, tab2 = st.tabs(["📤 Cargar y Enviar", "📜 Historial de Auditoría"])
 
     with tab1:
-        st.subheader("Cargar nuevo entregable")
+        st.subheader(f"Cargar nuevo entregable para: {cliente_seleccionado}")
         
         with st.form("form_auditor", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                cliente = st.text_input("Nombre del Cliente/Empresa")
                 periodo = st.text_input("Periodo Fiscal (ej. 2026)")
             with col2:
-                tipo = st.selectbox("Tipo de Entregable", 
-                                    ["Aenxos de Declaraciones"])
+                tipo = st.selectbox(
+                    "Tipo de Entregable", 
+                    ["Libros de Ventas", "Libros de Compras", "Planillas", "Declaraciones", "Anexos Financieros", "Dictamen Fiscal"]
+                )
                 fecha = st.date_input("Fecha de emisión")
             
             archivos = st.file_uploader("Adjuntar archivos", accept_multiple_files=True)
@@ -47,18 +47,16 @@ def auditor_deliverables_portal():
             submitted = st.form_submit_button("🚀 Procesar y 'Enviar' Entregable")
             
             if submitted:
-                if archivos and cliente:
-                    # 1. Aquí guardarías los archivos en una carpeta (ej: /entregables)
-                    # Por ahora simulamos el registro del envío
+                if archivos:
                     registro = {
-                        "cliente": cliente,
+                        "cliente": cliente_seleccionado,
                         "tipo": tipo,
                         "periodo": periodo,
                         "fecha": str(fecha),
-                        "archivos_procesados": [f.name for f in archivos]
+                        "archivos_procesados": [f.name for f in archivos],
+                        "notas": notas
                     }
                     
-                    # 2. Guardar en JSON (Base de datos simple)
                     data = []
                     if os.path.exists(LOG_FILE):
                         with open(LOG_FILE, "r") as f:
@@ -69,9 +67,9 @@ def auditor_deliverables_portal():
                     with open(LOG_FILE, "w") as f:
                         json.dump(data, f, indent=4)
                     
-                    st.success(f"¡Entregable de {tipo} registrado y listo para el cliente {cliente}!")
+                    st.success(f"¡Entregable de {tipo} registrado con éxito para {cliente_seleccionado}!")
                 else:
-                    st.error("Por favor completa los campos obligatorios y sube al menos un archivo.")
+                    st.error("Por favor adjunta al menos un archivo antes de procesar.")
 
     with tab2:
         st.subheader("Registros de Envíos")
