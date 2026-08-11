@@ -19,8 +19,8 @@ def main():
         # Tu lógica de cliente actual
         st.write("Vista de cliente...")
     else:
-        # Llamas a la función del módulo externo
-        auditor_deliverables_portal()
+        # Pasamos el nombre del usuario logueado al portal de auditoría
+        auditor_deliverables_portal(st.session_state.username)
 
 if __name__ == "__main__":
     main()
