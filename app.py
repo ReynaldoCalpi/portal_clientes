@@ -254,7 +254,7 @@ official_clients = {
     "distribuidora_libertad": {"password": "libertad_2026", "role": "client", "name": "Distribuidora Libertad"},
     "leftech": {"password": "leftech_2026", "role": "client", "name": "Leftech"},
     "cedillo": {"password": "cedillo_2026", "role": "client", "name": "Cedillo"},
-    "mercadito_rosa": {"password": "rosa_2026", "role": "client", "name": "Mercadito Rosa de Saron AC"}
+    "mercadito_rosa": {"password": "rosa_2026", "role": "client", "name": "Mercadito Rosa de Saron AC"},
     "Heavens Coffe SAS": {"password": "heavens2026", "role": "client", "name": "Heavens Coffe SAS"}
 }
 
