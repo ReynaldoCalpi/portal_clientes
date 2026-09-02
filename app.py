@@ -20,11 +20,19 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Configuración de Persistencia en Disco ---
-DB_FILE = "submissions_db.json"
-EMPLOYEES_FILE = "employees_db.json"
-EVENTUALES_FILE = "eventuales_db.json"
-UPLOAD_DIR = "uploaded_files"
+# --- Configuración de Persistencia en Disco (Soporte local y Render /data) ---
+DATA_DIR = "/data" if os.path.exists("/data") else "."
+
+DB_FILE = os.path.join(DATA_DIR, "submissions_db.json")
+EMPLOYEES_FILE = os.path.join(DATA_DIR, "employees_db.json")
+EVENTUALES_FILE = os.path.join(DATA_DIR, "eventuales_db.json")
+UPLOAD_DIR = os.path.join(DATA_DIR, "uploaded_files")
+LOG_FILE = os.path.join(DATA_DIR, "historial_entregas.json")
+CARPETA_ENTREGABLES = os.path.join(DATA_DIR, "entregables_guardados")
+
+# Asegurar que las carpetas existan en el entorno actual
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(CARPETA_ENTREGABLES, exist_ok=True)
 
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
