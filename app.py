@@ -26,6 +26,7 @@ DATA_DIR = "/data" if os.path.exists("/data") else "."
 DB_FILE = os.path.join(DATA_DIR, "submissions_db.json")
 EMPLOYEES_FILE = os.path.join(DATA_DIR, "employees_db.json")
 EVENTUALES_FILE = os.path.join(DATA_DIR, "eventuales_db.json")
+CLIENTS_FILE = os.path.join(DATA_DIR, "clients_db.json")  # <-- NUEVO: Archivo persistente para clientes
 UPLOAD_DIR = os.path.join(DATA_DIR, "uploaded_files")
 LOG_FILE = os.path.join(DATA_DIR, "historial_entregas.json")
 CARPETA_ENTREGABLES = os.path.join(DATA_DIR, "entregables_guardados")
@@ -101,23 +102,19 @@ def create_zip_buffer(json_list, pdf_list):
 
 # --- Funciones de Cálculo de Ley (El Salvador) ---
 def calcular_isss_quincenal(sueldo_base_q):
-    # ISSS: 3% con techo de $500 quincenal ($1,000 mensual)
     base = min(sueldo_base_q, 500.0)
     return round(base * 0.03, 2)
 
 def calcular_afp_quincenal(sueldo_base_q):
-    # AFP: 7.25% sobre el sueldo base quincenal
     return round(sueldo_base_q * 0.0725, 2)
 
 def calcular_renta_quincenal(sueldo_neto_isss_afp):
-    # Tramos de Renta Quincenal (El Salvador - Vigente)
     b = sueldo_neto_isss_afp
     if b <= 275.00:
         return 0.0
     elif b <= 447.62:
         return round((b - 275.00) * 0.10 + 8.83, 2)
     elif b <= 1019.05:
-        # Nota: ajustado a b - 447.62 para continuidad exacta del tramo
         return round((b - 447.62) * 0.20 + 30.00, 2)
     else:
         return round((b - 1019.05) * 0.30 + 144.28, 2)
@@ -248,14 +245,12 @@ if "username" not in st.session_state:
 if "user_id" not in st.session_state:
     st.session_state.user_id = ""
 
-if "clients_db" not in st.session_state:
-    st.session_state.clients_db = {}
 if "employees_db" not in st.session_state:
     st.session_state.employees_db = load_json_db(EMPLOYEES_FILE)
 if "eventuales_db" not in st.session_state:
     st.session_state.eventuales_db = load_json_db(EVENTUALES_FILE)
 
-# --- Sincronización de Clientes Oficiales ---
+# --- Sincronización de Clientes Oficiales y Persistentes ---
 official_clients = {
     "admin": {"password": "admin123", "role": "admin", "name": "Administrador General"},
     "soluciones_503": {"password": "sol503_2026", "role": "client", "name": "Soluciones 503 S.A.S. de C.V"},
@@ -266,8 +261,18 @@ official_clients = {
     "heavens_coffe": {"password": "heavens2026", "role": "client", "name": "Heavens Coffe SAS"}
 }
 
-for k, v in official_clients.items():
-    st.session_state.clients_db[k] = v
+if "clients_db" not in st.session_state:
+    saved_clients = load_json_db(CLIENTS_FILE)
+    if not saved_clients:
+        saved_clients = official_clients
+        save_json_db(CLIENTS_FILE, saved_clients)
+    else:
+        # Asegurar que los oficiales siempre estén presentes
+        for k, v in official_clients.items():
+            if k not in saved_clients:
+                saved_clients[k] = v
+        save_json_db(CLIENTS_FILE, saved_clients)
+    st.session_state.clients_db = saved_clients
 
 # --- Pantalla de Login ---
 def login_screen():
@@ -297,6 +302,12 @@ def admin_dashboard():
     st.title("🎛️ Panel de Control - Administrador")
     st.markdown("Supervisa el cumplimiento fiscal, administra cuentas, revisa los documentos cargados y gestiona entregables de auditoría.")
     
+    # Diagnóstico rápido de disco para tu tranquilidad
+    with st.expander("🛠️ Diagnóstico de Disco Persistente"):
+        st.write(f"Ruta actual de almacenamiento (`DATA_DIR`): `{DATA_DIR}`")
+        st.write(f"¿Existe la carpeta de datos?: {os.path.exists(DATA_DIR)}")
+        st.write(f"¿Disco Render activo (`/data`)?: {os.path.exists('/data')}")
+
     tab1, tab2, tab3, tab4 = st.tabs(["📋 Estatus y Archivos Recibidos", "📤 Cargar Entregables de Auditoría", "➕ Crear Nuevo Usuario", "👥 Listado de Cuentas"])
     
     with tab1:
@@ -576,7 +587,9 @@ def admin_dashboard():
                             "role": "client",
                             "name": company_name
                         }
-                        st.success(f"¡Cliente **{company_name}** registrado con éxito!")
+                        # --- GUARDAR EN DISCO PERSISTENTE ---
+                        save_json_db(CLIENTS_FILE, st.session_state.clients_db)
+                        st.success(f"¡Cliente **{company_name}** registrado con éxito en el disco persistente!")
                 else:
                     st.warning("Completa todos los campos.")
 
@@ -819,7 +832,6 @@ def client_dashboard():
                         afp_q = 0.0
                         renta_q = 0.0
                         
-                        # Detectar automáticamente según el código guardado en el maestro
                         codigo_emp = str(item.get('codigo', '01')).strip()
                         
                         if "01" in codigo_emp:
@@ -827,7 +839,7 @@ def client_dashboard():
                             afp_q = calcular_afp_quincenal(devengado_q)
                             neto_gravable = devengado_q - isss_q - afp_q
                             renta_q = calcular_renta_quincenal(neto_gravable)
-                        else: # Código 60 u otros servicios profesionales
+                        else:
                             isss_q = 0.0
                             afp_q = 0.0
                             renta_q = round(devengado_q * 0.10, 2)
@@ -893,7 +905,6 @@ def client_dashboard():
                             use_container_width=True
                         )
                         
-                        # Generador de Excel Profesional para descarga
                         output_pq = io.BytesIO()
                         total_row_pq = pd.DataFrame([{
                             "Empleado": "TOTALES GENERALES",
@@ -1346,7 +1357,7 @@ def client_dashboard():
                         )
                         
                         st.divider()
-                        if st.button("📤 Enviar Planilla Oficial de Eventuales a RI Consultores", use_container_width=True, type="primary"):
+                        if st.button("📤 Enviar Planilla Oficial de Eventuales a Render / RI Consultores", use_container_width=True, type="primary"):
                             planilla_submission_record = {
                                 "user_id": current_user_id,
                                 "client": st.session_state.username,
