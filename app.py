@@ -1382,6 +1382,7 @@ if not st.session_state.logged_in:
     login_screen()
 else:
     with st.sidebar:
+        st.image("logo.jpg", use_container_width=True)
         st.write(f"Conectado como:\n**{st.session_state.username}**")
         st.divider()
         st.markdown("🌐 **Sitio Web:**")
