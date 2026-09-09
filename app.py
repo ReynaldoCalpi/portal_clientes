@@ -1382,8 +1382,11 @@ if not st.session_state.logged_in:
     login_screen()
 else:
     with st.sidebar:
-            if os.path.exists("logo.jpg"):
-                st.image("logo.jpg", use_container_width=True)
+            # Ruta absoluta basada en la ubicación real de app.py
+            logo_path = os.path.join(os.path.dirname(__file__), "logo.jpg")
+            
+            if os.path.exists(logo_path):
+                st.image(logo_path, use_container_width=True)
             else:
                 st.warning("No se encontró la imagen del logo.")
             
