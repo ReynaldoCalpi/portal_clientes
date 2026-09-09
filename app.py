@@ -1382,13 +1382,13 @@ if not st.session_state.logged_in:
     login_screen()
 else:
     with st.sidebar:
-        if os.path.exists("logo.jpg"):
-    st.image("logo.jpg", use_container_width=True)
-else:
-    st.warning("No se encontró la imagen del logo.")
-        st.write(f"Conectado como:\n**{st.session_state.username}**")
-        st.divider()
-        st.markdown("🌐 **Sitio Web:**")
+            if os.path.exists("logo.jpg"):
+                st.image("logo.jpg", use_container_width=True)
+            else:
+                st.warning("No se encontró la imagen del logo.")
+            
+            st.write(f"Conectado como:\n**{st.session_state.username}**")
+            st.divider()        st.markdown("🌐 **Sitio Web:**")
         st.markdown("[Visitar sitio web](https://throbbing-sky-ca37.riconsultoressv2021.workers.dev/)")
         st.markdown("💬 **WhatsApp:**")
         st.markdown("[Escríbenos (+503 7824 9071)](https://wa.me/50378249071)")
