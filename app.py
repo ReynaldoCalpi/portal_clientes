@@ -1384,6 +1384,11 @@ else:
     with st.sidebar:
         st.write(f"Conectado como:\n**{st.session_state.username}**")
         st.divider()
+        st.markdown("🌐 **Sitio Web:**")
+        st.markdown("[Visitar sitio web](https://throbbing-sky-ca37.riconsultoressv2021.workers.dev/)")
+        st.markdown("💬 **WhatsApp:**")
+        st.markdown("[Escríbenos (+503 7824 9071)](https://wa.me/50378249071)")
+        st.divider()
         if st.button("Cerrar Sesión", type="primary"):
             st.session_state.logged_in = False
             st.session_state.user_role = None
