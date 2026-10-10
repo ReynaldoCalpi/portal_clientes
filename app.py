@@ -334,7 +334,7 @@ def admin_dashboard():
                 if envio.get("type") == "planilla_quincenal_empleados":
                     with st.expander(f"💼 [PLANILLA QUINCENAL SUELDOS] {envio['client']} — ({envio.get('quincena', 'Quincena')}) — Entregado el {envio['fecha']}"):
                         st.markdown(f"**Periodo Fiscal:** {envio['periodo']} | **Quincena:** {envio.get('quincena', 'N/A')}")
-                        st.markdown(f"**Resumen Consolidado:** Total Devengado: **${envio['total_devengado']:,.2f}** \vert{} ISSS: **${envio['total_isss']:,.2f}** | AFP: **${envio['total_afp']:,.2f}** \vert{} RENTA: **${envio['total_renta']:,.2f}** | Líquido a Pagar: **${envio['total_liquido']:,.2f}**")
+                        st.markdown(f"**Resumen Consolidado:** Total Devengado: **${envio['total_devengado']:,.2f}** | ISSS: **${envio['total_isss']:,.2f}** | AFP: **${envio['total_afp']:,.2f}** | RENTA: **${envio['total_renta']:,.2f}** | Líquido a Pagar: **${envio['total_liquido']:,.2f}**")
                         
                         df_pq_admin = pd.DataFrame(envio['data'])
                         output_pq_adm = io.BytesIO()
