@@ -339,7 +339,9 @@ def admin_dashboard():
                         df_pq_admin = pd.DataFrame(envio['data'])
                         # Protección para registros antiguos sin días trabajados
                         if "Días Trab." not in df_pq_admin.columns:
-                            df_pq_admin["Días Trab."] = 15.0                        output_pq_adm = io.BytesIO()
+                            df_pq_admin["Días Trab."] = 15.0
+                            
+                        output_pq_adm = io.BytesIO()
                         total_row_pq_adm = pd.DataFrame([{
                             "Empleado": "TOTALES GENERALES",
                             "DUI": "",
